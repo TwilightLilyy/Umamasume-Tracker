@@ -38,6 +38,12 @@ const TIMER_COLORS = [
   "#ec4899",
 ];
 
+const TIMER_CATEGORY_COLORS = {
+  purple: "#a855f7",
+  gray: "#9ca3af",
+  forest: "#228b22",
+} as const;
+
 function defaultTimerColor(index: number) {
   if (index < 0) return TIMER_COLORS[0];
   return TIMER_COLORS[index % TIMER_COLORS.length];
@@ -954,6 +960,14 @@ function resolveTimerColor(t: TimerData, index: number) {
   return sanitizeTimerColor(t.color, index);
 }
 
+function resolveOverviewTimerColor(label?: string) {
+  const name = label?.trim();
+  if (!name) return TIMER_CATEGORY_COLORS.forest;
+  if (/\b(champion|cup|cc)\b/i.test(name)) return TIMER_CATEGORY_COLORS.purple;
+  if (/\b(support|card)\b/i.test(name)) return TIMER_CATEGORY_COLORS.gray;
+  return TIMER_CATEGORY_COLORS.forest;
+}
+
 interface TimerRowProps {
   t: TimerData;
   meta: TimerDisplayData;
@@ -1082,6 +1096,7 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
               : t.remainingMs <= 0
               ? "Ready"
               : `${formatDHMS(t.remainingMs)} (${formatMMSS(t.remainingMs)})`;
+            const overviewColor = resolveOverviewTimerColor(label);
             const accent = t.colorResolved;
             const gradient = `linear-gradient(140deg, ${withAlpha(mixColor(accent, "#ffffff", 0.35), 0.9)} 0%, ${withAlpha(
               mixColor(accent, "#000000", 0.4),
@@ -1112,12 +1127,12 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
                         width: 10,
                         height: 10,
                         borderRadius: "50%",
-                        background: t.colorResolved,
-                        border: `1px solid ${withAlpha(mixColor(accent, "#000000", 0.3), 0.85)}`,
-                        boxShadow: `0 0 8px ${withAlpha(accent, 0.6)}`,
+                        background: overviewColor,
+                        border: `1px solid ${COLOR.border}`,
+                        boxShadow: "0 0 4px rgba(0,0,0,0.45)",
                       }}
                     />
-                    <span style={{ wordBreak: "break-word" }}>{label}</span>
+                    <span style={{ wordBreak: "break-word", color: overviewColor }}>{label}</span>
                   </span>
                   <span style={{ color: withAlpha(accent, 0.75), fontSize: 12 }}>{status}</span>
                 </div>
@@ -1134,10 +1149,7 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
                   <div
                     style={{
                       width: `${t.progress * 100}%`,
-                      background: `linear-gradient(135deg, ${withAlpha(mixColor(accent, "#ffffff", 0.3), 0.9)} 0%, ${withAlpha(
-                        mixColor(accent, "#000000", 0.2),
-                        0.95
-                      )} 100%)`,
+                      background: overviewColor,
                       height: "100%",
                       transition: "width 0.3s ease",
                     }}
@@ -1154,6 +1166,8 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
           <div style={{ fontSize: 13, color: COLOR.subtle }}>Exact date/time timers</div>
           {sortedAbs.map((a, index) => {
             const rem = Math.max(0, a.ts - nowMs);
+            const label = a.label || "Timer";
+            const overviewColor = resolveOverviewTimerColor(label);
             const palette = [COLOR.rp, COLOR.tp, COLOR.good];
             const accent = palette[index % palette.length];
             const gradient = `linear-gradient(140deg, ${withAlpha(mixColor(accent, "#ffffff", 0.3), 0.9)} 0%, ${withAlpha(
@@ -1179,8 +1193,8 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
                     gap: 8,
                   }}
                 >
-                  <span style={{ fontWeight: 600, wordBreak: "break-word" }}>
-                    {a.label || "Timer"}
+                  <span style={{ fontWeight: 600, wordBreak: "break-word", color: overviewColor }}>
+                    {label}
                   </span>
                   <span style={{ color: withAlpha(accent, 0.8), fontSize: 12 }}>
                     {new Date(a.ts).toLocaleString(undefined, { timeZone: zone })}
