@@ -38,11 +38,20 @@ const TIMER_COLORS = [
   "#ec4899",
 ];
 
-const TIMER_CATEGORY_COLORS = {
-  purple: "#a855f7",
-  gray: "#9ca3af",
-  forest: "#228b22",
-} as const;
+type AbsTimerStatus = "active" | "completed" | "expired";
+
+interface AbsTimerGroup {
+  id: string;
+  name: string;
+  color: string;
+}
+
+const DEFAULT_ABS_TIMER_GROUPS: AbsTimerGroup[] = [
+  { id: "uma-banners", name: "Uma banners", color: "#fb923c" },
+  { id: "support-card-banners", name: "Support card banners", color: "#60a5fa" },
+  { id: "champions-meeting", name: "Champions Meeting", color: "#c084fc" },
+  { id: "other", name: "Other", color: "#9ca3af" },
+];
 
 function defaultTimerColor(index: number) {
   if (index < 0) return TIMER_COLORS[0];
@@ -608,6 +617,35 @@ function Input({ value, onChange, placeholder, type = "text" }: InputProps) {
   );
 }
 
+interface SelectProps {
+  value: string;
+  onChange: (value: string) => void;
+  children: React.ReactNode;
+}
+
+function Select({ value, onChange, children }: SelectProps) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      style={{
+        padding: "8px 12px",
+        borderRadius: 12,
+        background: `linear-gradient(135deg, ${withAlpha(mixColor(COLOR.bg, "#ffffff", 0.08), 0.9)} 0%, ${withAlpha(
+          mixColor(COLOR.bg, "#000000", 0.4),
+          0.95
+        )} 100%)`,
+        color: COLOR.text,
+        border: `1px solid ${withAlpha(COLOR.border, 0.85)}`,
+        boxShadow: `0 6px 18px ${withAlpha("#000000", 0.3)}`,
+        minWidth: 160,
+      }}
+    >
+      {children}
+    </select>
+  );
+}
+
 function CountdownRow({ targetMs, timeZone }: { targetMs: number; timeZone: string }) {
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -883,26 +921,362 @@ function AddTimerForm({ onAdd, defaultColor }: AddTimerFormProps) {
   );
 }
 
-interface AddAbsTimerFormProps {
-  onAdd: (label: string, dateTime: string) => void;
+function formatDateTimeLocalInput(ts: number) {
+  if (!Number.isFinite(ts)) return "";
+  const date = new Date(ts);
+  const offset = date.getTimezoneOffset();
+  const local = new Date(ts - offset * 60000);
+  return local.toISOString().slice(0, 16);
 }
 
-function AddAbsTimerForm({ onAdd }: AddAbsTimerFormProps) {
+interface AddAbsTimerFormProps {
+  onAdd: (groupId: string, label: string, dateTime: string) => void;
+  groups: AbsTimerGroup[];
+  defaultGroupId: string;
+}
+
+function AddAbsTimerForm({ onAdd, groups, defaultGroupId }: AddAbsTimerFormProps) {
   const [label, setLabel] = useState("");
   const [dt, setDt] = useState("");
+  const [groupId, setGroupId] = useState(defaultGroupId);
+
+  useEffect(() => {
+    setGroupId((prev) => {
+      if (groups.some((g) => g.id === prev)) return prev;
+      return defaultGroupId;
+    });
+  }, [groups, defaultGroupId]);
+
   return (
-    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
       <Input placeholder="Label (e.g., Banner Release)" value={label} onChange={setLabel} />
       <Input type="datetime-local" value={dt} onChange={setDt} />
+      <Select value={groupId} onChange={setGroupId}>
+        {groups.map((g) => (
+          <option key={g.id} value={g.id}>
+            {g.name}
+          </option>
+        ))}
+      </Select>
       <SmallBtn
         onClick={() => {
-          onAdd(label, dt);
+          onAdd(groupId, label, dt);
           setLabel("");
           setDt("");
+          setGroupId(defaultGroupId);
         }}
       >
-        Add
+        Add timer
       </SmallBtn>
+    </div>
+  );
+}
+
+interface AddGroupFormProps {
+  onAdd: (name: string, color: string) => void;
+  defaultColor: string;
+}
+
+function AddGroupForm({ onAdd, defaultColor }: AddGroupFormProps) {
+  const [name, setName] = useState("");
+  const [color, setColor] = useState(defaultColor);
+
+  useEffect(() => {
+    setColor(defaultColor);
+  }, [defaultColor]);
+
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <Input placeholder="Group name" value={name} onChange={setName} />
+      <label
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: "50%",
+          border: `1px solid ${withAlpha(COLOR.border, 0.85)}`,
+          boxShadow: `0 0 12px ${withAlpha(color, 0.6)}`,
+          position: "relative",
+          cursor: "pointer",
+          background: color,
+        }}
+        title="Pick group color"
+      >
+        <input
+          type="color"
+          value={color}
+          onChange={(e) => setColor(e.target.value)}
+          style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }}
+        />
+      </label>
+      <SmallBtn
+        onClick={() => {
+          onAdd(name, color);
+          setName("");
+          setColor(defaultColor);
+        }}
+      >
+        Add group
+      </SmallBtn>
+    </div>
+  );
+}
+
+interface AbsTimerItemProps {
+  timer: AbsTimer;
+  groups: AbsTimerGroup[];
+  accent: string;
+  onUpdate: (id: string, updates: { label?: string; ts?: number; groupId?: string }) => void;
+  onStatusChange: (id: string, status: AbsTimerStatus) => void;
+  onDelete: (id: string) => void;
+  onCopyOverlay: () => void;
+  timeZone: string;
+}
+
+function AbsTimerItem({
+  timer,
+  groups,
+  accent,
+  onUpdate,
+  onStatusChange,
+  onDelete,
+  onCopyOverlay,
+  timeZone,
+}: AbsTimerItemProps) {
+  const [editing, setEditing] = useState(false);
+  const [labelDraft, setLabelDraft] = useState(timer.label || "");
+  const [dtDraft, setDtDraft] = useState(formatDateTimeLocalInput(timer.ts));
+  const [groupDraft, setGroupDraft] = useState(timer.groupId);
+
+  useEffect(() => {
+    setLabelDraft(timer.label || "");
+    setDtDraft(formatDateTimeLocalInput(timer.ts));
+    setGroupDraft(timer.groupId);
+  }, [timer]);
+
+  useEffect(() => {
+    setGroupDraft((prev) => {
+      if (groups.some((g) => g.id === prev)) return prev;
+      return groups[0]?.id || timer.groupId;
+    });
+  }, [groups, timer.groupId]);
+
+  const save = () => {
+    if (!dtDraft) return;
+    const ts = new Date(dtDraft).getTime();
+    if (!Number.isFinite(ts)) return;
+    const trimmed = labelDraft.trim();
+    const targetGroup = groups.some((g) => g.id === groupDraft)
+      ? groupDraft
+      : groups[0]?.id || timer.groupId;
+    onUpdate(timer.id, { label: trimmed, ts, groupId: targetGroup });
+    setEditing(false);
+  };
+
+  const cancel = () => {
+    setLabelDraft(timer.label || "");
+    setDtDraft(formatDateTimeLocalInput(timer.ts));
+    setGroupDraft(timer.groupId);
+    setEditing(false);
+  };
+
+  const nowMs = now();
+  const remaining = timer.ts - nowMs;
+  const timeLine =
+    remaining > 0
+      ? `Time left: ${formatDHMS(remaining)} (${formatMMSS(remaining)})`
+      : `Ended ${formatDHMS(-remaining)} ago`;
+  let statusText = "Active";
+  let statusColor = withAlpha(accent, 0.85);
+  if (timer.status === "completed") {
+    statusText = "Completed";
+    statusColor = COLOR.good;
+  } else if (timer.status === "expired") {
+    statusText = "Expired";
+    statusColor = COLOR.danger;
+  } else if (remaining <= 0) {
+    statusText = "Ended";
+    statusColor = COLOR.danger;
+  }
+
+  return (
+    <div style={cardRowStyle(accent)}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {editing ? (
+          <div style={{ display: "grid", gap: 8 }}>
+            <Input placeholder="Label" value={labelDraft} onChange={setLabelDraft} />
+            <Input type="datetime-local" value={dtDraft} onChange={setDtDraft} />
+            <Select value={groupDraft} onChange={setGroupDraft}>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 4 }}>
+            <div style={{ fontWeight: 600, wordBreak: "break-word" }}>{timer.label || "Timer"}</div>
+            <div style={{ fontSize: 13, color: COLOR.subtle }}>
+              At: {new Date(timer.ts).toLocaleString(undefined, { timeZone })}
+            </div>
+            <div style={{ fontSize: 14 }}>{timeLine}</div>
+            <div style={{ fontSize: 13, color: statusColor }}>Status: {statusText}</div>
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {editing ? (
+          <>
+            <SmallBtn onClick={save}>Save</SmallBtn>
+            <SmallBtn onClick={cancel}>Cancel</SmallBtn>
+            <SmallBtn danger onClick={() => onDelete(timer.id)}>
+              Delete
+            </SmallBtn>
+          </>
+        ) : (
+          <>
+            <SmallBtn onClick={() => setEditing(true)}>Edit</SmallBtn>
+            {timer.status !== "completed" && (
+              <SmallBtn onClick={() => onStatusChange(timer.id, "completed")}>Mark Completed</SmallBtn>
+            )}
+            {timer.status !== "expired" && (
+              <SmallBtn onClick={() => onStatusChange(timer.id, "expired")}>Mark Expired</SmallBtn>
+            )}
+            {timer.status !== "active" && (
+              <SmallBtn onClick={() => onStatusChange(timer.id, "active")}>Mark Active</SmallBtn>
+            )}
+            <SmallBtn onClick={onCopyOverlay}>Copy Overlay URL</SmallBtn>
+            <SmallBtn danger onClick={() => onDelete(timer.id)}>
+              Delete
+            </SmallBtn>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface AbsTimerGroupSectionProps {
+  group: AbsTimerGroup;
+  timers: AbsTimer[];
+  groups: AbsTimerGroup[];
+  onUpdateGroup: (id: string, updates: Partial<AbsTimerGroup>) => void;
+  onUpdateTimer: (id: string, updates: { label?: string; ts?: number; groupId?: string }) => void;
+  onStatusChange: (id: string, status: AbsTimerStatus) => void;
+  onDeleteTimer: (id: string) => void;
+  onCopyOverlay: (id: string) => void;
+  timeZone: string;
+}
+
+function AbsTimerGroupSection({
+  group,
+  timers,
+  groups,
+  onUpdateGroup,
+  onUpdateTimer,
+  onStatusChange,
+  onDeleteTimer,
+  onCopyOverlay,
+  timeZone,
+}: AbsTimerGroupSectionProps) {
+  const [editing, setEditing] = useState(false);
+  const [nameDraft, setNameDraft] = useState(group.name);
+  const [colorDraft, setColorDraft] = useState(group.color);
+
+  useEffect(() => {
+    setNameDraft(group.name);
+    setColorDraft(group.color);
+  }, [group.name, group.color]);
+
+  const saveGroup = () => {
+    onUpdateGroup(group.id, { name: nameDraft, color: colorDraft });
+    setEditing(false);
+  };
+
+  const cancelGroup = () => {
+    setNameDraft(group.name);
+    setColorDraft(group.color);
+    setEditing(false);
+  };
+
+  const sortedTimers = [...timers].sort((a, b) => a.ts - b.ts);
+
+  return (
+    <div
+      style={{
+        background: COLOR.card,
+        border: `1px solid ${COLOR.border}`,
+        borderRadius: 16,
+        padding: 16,
+        boxShadow: "0 6px 24px rgba(0,0,0,.25)",
+        display: "grid",
+        gap: 12,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span
+            style={{
+              width: 16,
+              height: 16,
+              borderRadius: "50%",
+              background: group.color,
+              boxShadow: `0 0 10px ${withAlpha(group.color, 0.7)}`,
+              border: `1px solid ${withAlpha(mixColor(group.color, "#000000", 0.3), 0.9)}`,
+              flexShrink: 0,
+            }}
+          />
+          <div style={{ fontSize: 15, fontWeight: 600 }}>{group.name}</div>
+        </div>
+        {editing ? (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <Input value={nameDraft} onChange={setNameDraft} placeholder="Group name" />
+            <label
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: "50%",
+                border: `1px solid ${withAlpha(COLOR.border, 0.85)}`,
+                boxShadow: `0 0 10px ${withAlpha(colorDraft, 0.6)}`,
+                position: "relative",
+                cursor: "pointer",
+                background: colorDraft,
+              }}
+              title="Pick group color"
+            >
+              <input
+                type="color"
+                value={colorDraft}
+                onChange={(e) => setColorDraft(e.target.value)}
+                style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }}
+              />
+            </label>
+            <SmallBtn onClick={saveGroup}>Save</SmallBtn>
+            <SmallBtn onClick={cancelGroup}>Cancel</SmallBtn>
+          </div>
+        ) : (
+          <SmallBtn onClick={() => setEditing(true)}>Edit group</SmallBtn>
+        )}
+      </div>
+      {sortedTimers.length === 0 ? (
+        <p style={{ color: COLOR.subtle, fontSize: 13, margin: 0 }}>No timers in this group yet.</p>
+      ) : (
+        <div style={{ display: "grid", gap: 12 }}>
+          {sortedTimers.map((timer) => (
+            <AbsTimerItem
+              key={timer.id}
+              timer={timer}
+              groups={groups}
+              accent={group.color}
+              onUpdate={onUpdateTimer}
+              onStatusChange={onStatusChange}
+              onDelete={onDeleteTimer}
+              onCopyOverlay={() => onCopyOverlay(timer.id)}
+              timeZone={timeZone}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -958,14 +1332,6 @@ function computeTimerTotalMs(t: TimerData, remaining: number, nowMs: number) {
 
 function resolveTimerColor(t: TimerData, index: number) {
   return sanitizeTimerColor(t.color, index);
-}
-
-function resolveOverviewTimerColor(label?: string) {
-  const name = label?.trim();
-  if (!name) return TIMER_CATEGORY_COLORS.forest;
-  if (/\b(champion|cup|cc)\b/i.test(name)) return TIMER_CATEGORY_COLORS.purple;
-  if (/\b(support|card)\b/i.test(name)) return TIMER_CATEGORY_COLORS.gray;
-  return TIMER_CATEGORY_COLORS.forest;
 }
 
 interface TimerRowProps {
@@ -1068,7 +1434,7 @@ function TimerRow({ t, meta, onAddMinutes, onPause, onReset, onDelete, onCopy, o
 
 interface TimerOverviewListProps {
   timers: TimerDisplayData[];
-  absTimers: AbsTimer[];
+  absTimers: AbsTimerDisplay[];
   timeZone: string;
 }
 
@@ -1082,7 +1448,17 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
 
   const zone = ensureTimeZone(timeZone);
   const nowMs = now();
-  const sortedAbs = [...absTimers].sort((a, b) => a.ts - b.ts);
+  const sortedAbs = [...absTimers].sort((a, b) => {
+    const weight = (t: AbsTimerDisplay) => {
+      if (t.status === "active") return t.ts <= nowMs ? 1 : 0;
+      if (t.status === "completed") return 2;
+      return 3;
+    };
+    const wa = weight(a);
+    const wb = weight(b);
+    if (wa !== wb) return wa - wb;
+    return a.ts - b.ts;
+  });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1096,7 +1472,6 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
               : t.remainingMs <= 0
               ? "Ready"
               : `${formatDHMS(t.remainingMs)} (${formatMMSS(t.remainingMs)})`;
-            const overviewColor = resolveOverviewTimerColor(label);
             const accent = t.colorResolved;
             const gradient = `linear-gradient(140deg, ${withAlpha(mixColor(accent, "#ffffff", 0.35), 0.9)} 0%, ${withAlpha(
               mixColor(accent, "#000000", 0.4),
@@ -1127,12 +1502,12 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
                         width: 10,
                         height: 10,
                         borderRadius: "50%",
-                        background: overviewColor,
+                        background: t.colorResolved,
                         border: `1px solid ${COLOR.border}`,
                         boxShadow: "0 0 4px rgba(0,0,0,0.45)",
                       }}
                     />
-                    <span style={{ wordBreak: "break-word", color: overviewColor }}>{label}</span>
+                    <span style={{ wordBreak: "break-word", color: t.colorResolved }}>{label}</span>
                   </span>
                   <span style={{ color: withAlpha(accent, 0.75), fontSize: 12 }}>{status}</span>
                 </div>
@@ -1149,7 +1524,7 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
                   <div
                     style={{
                       width: `${t.progress * 100}%`,
-                      background: overviewColor,
+                      background: t.colorResolved,
                       height: "100%",
                       transition: "width 0.3s ease",
                     }}
@@ -1164,44 +1539,37 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
       {sortedAbs.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ fontSize: 13, color: COLOR.subtle }}>Exact date/time timers</div>
-          {sortedAbs.map((a, index) => {
-            const rem = Math.max(0, a.ts - nowMs);
-            const label = a.label || "Timer";
-            const overviewColor = resolveOverviewTimerColor(label);
-            const palette = [COLOR.rp, COLOR.tp, COLOR.good];
-            const accent = palette[index % palette.length];
-            const gradient = `linear-gradient(140deg, ${withAlpha(mixColor(accent, "#ffffff", 0.3), 0.9)} 0%, ${withAlpha(
-              mixColor(accent, "#000000", 0.35),
-              0.95
-            )} 100%)`;
+          {sortedAbs.map((a) => {
+            const rem = a.ts - nowMs;
+            const accent = a.group.color;
+            const timeLine =
+              rem > 0
+                ? `Time left: ${formatDHMS(rem)} (${formatMMSS(rem)})`
+                : `Ended ${formatDHMS(-rem)} ago`;
+            const statusText =
+              a.status === "completed"
+                ? "Completed"
+                : a.status === "expired"
+                ? "Expired"
+                : rem <= 0
+                ? "Ended"
+                : "Active";
+            const statusColor =
+              a.status === "completed"
+                ? COLOR.good
+                : a.status === "expired" || rem <= 0
+                ? COLOR.danger
+                : withAlpha(accent, 0.85);
             return (
-              <div
-                key={a.id}
-                style={{
-                  background: gradient,
-                  border: `1px solid ${withAlpha(mixColor(accent, "#000000", 0.25), 0.85)}`,
-                  borderRadius: 12,
-                  padding: 12,
-                  boxShadow: `0 12px 26px ${withAlpha(accent, 0.25)}`,
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  <span style={{ fontWeight: 600, wordBreak: "break-word", color: overviewColor }}>
-                    {label}
-                  </span>
-                  <span style={{ color: withAlpha(accent, 0.8), fontSize: 12 }}>
-                    {new Date(a.ts).toLocaleString(undefined, { timeZone: zone })}
-                  </span>
-                </div>
-                <div style={{ marginTop: 6, fontSize: 12, color: withAlpha(accent, 0.75) }}>
-                  Time left: {formatDHMS(rem)} ({formatMMSS(rem)})
+              <div key={a.id} style={cardRowStyle(accent)}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ fontWeight: 600 }}>{a.label || "Timer"}</div>
+                  <div style={{ fontSize: 12, color: COLOR.subtle }}>{a.group.name}</div>
+                  <div style={{ fontSize: 13, color: COLOR.subtle }}>
+                    <span>At: {new Date(a.ts).toLocaleString(undefined, { timeZone: zone })}</span>
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: withAlpha(accent, 0.75) }}>{timeLine}</div>
+                  <div style={{ fontSize: 12, color: statusColor }}>Status: {statusText}</div>
                 </div>
               </div>
             );
@@ -1236,6 +1604,13 @@ interface AbsTimer {
   id: string;
   label?: string;
   ts: number;
+  groupId: string;
+  status?: AbsTimerStatus;
+}
+
+interface AbsTimerDisplay extends AbsTimer {
+  group: AbsTimerGroup;
+  status: AbsTimerStatus;
 }
 
 interface OverlayViewProps {
@@ -1421,6 +1796,10 @@ export default function UmaResourceTracker() {
     dailyReset: { atReset: true, hourBefore: true },
   });
   const [timers, setTimers] = useLocalStorage<TimerData[]>("uma.customTimers", []);
+  const [absGroups, setAbsGroups] = useLocalStorage<AbsTimerGroup[]>(
+    "uma.absTimerGroups",
+    DEFAULT_ABS_TIMER_GROUPS
+  );
   const [absTimers, setAbsTimers] = useLocalStorage<AbsTimer[]>("uma.absTimers", []);
   const [fired, setFired] = useLocalStorage<FiredState>("uma.fired", {
     tp: {},
@@ -1442,6 +1821,22 @@ export default function UmaResourceTracker() {
   useEffect(() => {
     if (!settingsOpen) setTzDraft(timezone);
   }, [timezone, settingsOpen]);
+
+  useEffect(() => {
+    setAbsGroups((prev) => {
+      const base = prev.length ? prev : DEFAULT_ABS_TIMER_GROUPS;
+      let changed = prev.length !== base.length;
+      const sanitized = base.map((g, index) => {
+        const id = typeof g.id === "string" && g.id ? g.id : crypto.randomUUID();
+        const name = g.name?.trim() || DEFAULT_ABS_TIMER_GROUPS[index]?.name || `Group ${index + 1}`;
+        const color = sanitizeTimerColor(g.color, index);
+        if (id !== g.id || name !== g.name || color !== g.color) changed = true;
+        return { id, name, color };
+      });
+      if (!sanitized.length) return DEFAULT_ABS_TIMER_GROUPS;
+      return changed ? sanitized : prev;
+    });
+  }, [setAbsGroups]);
 
   useEffect(() => {
     const sTP = sanitizeResource(tpRaw, TP_CAP);
@@ -1469,6 +1864,36 @@ export default function UmaResourceTracker() {
       }),
     [rpRaw]
   );
+
+  const fallbackGroupId = useMemo(() => {
+    if (!absGroups.length) return DEFAULT_ABS_TIMER_GROUPS[0].id;
+    const other = absGroups.find((g) => g.name.toLowerCase().includes("other"));
+    return other?.id ?? absGroups[0].id;
+  }, [absGroups]);
+
+  const groupsForForms = absGroups.length ? absGroups : DEFAULT_ABS_TIMER_GROUPS;
+  const formDefaultGroupId = groupsForForms.some((g) => g.id === fallbackGroupId)
+    ? fallbackGroupId
+    : groupsForForms[0]?.id || DEFAULT_ABS_TIMER_GROUPS[0].id;
+
+  useEffect(() => {
+    setAbsTimers((prev) => {
+      if (!prev.length) return prev;
+      const validIds = new Set(absGroups.map((g) => g.id));
+      let changed = false;
+      const updated = prev.map((t) => {
+        const groupId = validIds.has(t.groupId) ? t.groupId : fallbackGroupId;
+        const status: AbsTimerStatus =
+          t.status === "completed" || t.status === "expired" ? t.status : "active";
+        if (t.groupId !== groupId || t.status !== status) {
+          changed = true;
+          return { ...t, groupId, status };
+        }
+        return t;
+      });
+      return changed ? updated : prev;
+    });
+  }, [absGroups, fallbackGroupId, setAbsTimers]);
 
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -1525,6 +1950,32 @@ export default function UmaResourceTracker() {
     });
   }, [timers, tick]);
 
+  const timersByGroup = useMemo(() => {
+    const map = new Map<string, AbsTimer[]>();
+    for (const timer of absTimers) {
+      const targetGroupId = absGroups.some((g) => g.id === timer.groupId)
+        ? timer.groupId
+        : fallbackGroupId;
+      if (!map.has(targetGroupId)) map.set(targetGroupId, []);
+      map.get(targetGroupId)!.push(timer);
+    }
+    return map;
+  }, [absTimers, absGroups, fallbackGroupId]);
+
+  const decoratedAbsTimers = useMemo(() => {
+    const fallbackGroup =
+      absGroups.find((g) => g.id === fallbackGroupId) ?? DEFAULT_ABS_TIMER_GROUPS[0];
+    const byId = new Map<string, AbsTimerGroup>();
+    for (const group of absGroups) byId.set(group.id, group);
+    if (!byId.has(fallbackGroup.id)) byId.set(fallbackGroup.id, fallbackGroup);
+    return absTimers.map((t) => {
+      const group = byId.get(t.groupId) ?? fallbackGroup;
+      const status: AbsTimerStatus =
+        t.status === "completed" || t.status === "expired" ? t.status : "active";
+      return { ...t, group, status };
+    });
+  }, [absTimers, absGroups, fallbackGroupId]);
+
   const timerSummary = useMemo(() => {
     const arr = [...decoratedTimers];
     arr.sort((a, b) => {
@@ -1542,6 +1993,7 @@ export default function UmaResourceTracker() {
   }, [decoratedTimers]);
 
   const nextTimerColor = useMemo(() => defaultTimerColor(timers.length), [timers.length]);
+  const nextGroupColor = useMemo(() => defaultTimerColor(absGroups.length), [absGroups.length]);
 
   const curTP = useMemo(
     () => computeCurrent(tp.base, tp.last, TP_RATE_MS, TP_CAP, tp.nextOverride, now()),
@@ -1608,7 +2060,8 @@ export default function UmaResourceTracker() {
         if (!t.isPaused && Number.isFinite(t.targetTs) && now() >= (t.targetTs ?? 0))
           maybeFireTimer(t.id, t.label || "Timer", fired, setFired);
       for (const a of absTimers)
-        if (a.ts <= now()) maybeFireAbs(a.id, a.label || "Timer", fired, setFired);
+        if (a.status !== "completed" && a.status !== "expired" && a.ts <= now())
+          maybeFireAbs(a.id, a.label || "Timer", fired, setFired);
     }
     const dailyReset = {
       atReset: notif.dailyReset?.atReset !== false,
@@ -1794,13 +2247,62 @@ export default function UmaResourceTracker() {
   function deleteTimer(id: string) {
     setTimers((prev) => prev.filter((t) => t.id !== id));
   }
-  function addAbsTimer(label: string, whenTs: string) {
+  function addAbsGroup(name: string, colorInput: string) {
+    setAbsGroups((prev) => {
+      const label = name.trim() || `Group ${prev.length + 1}`;
+      const color = sanitizeTimerColor(colorInput, prev.length);
+      return [...prev, { id: crypto.randomUUID(), name: label, color }];
+    });
+  }
+
+  function editAbsGroup(id: string, updates: Partial<AbsTimerGroup>) {
+    setAbsGroups((prev) =>
+      prev.map((group, index) => {
+        if (group.id !== id) return group;
+        const nextName = updates.name != null ? updates.name.trim() : group.name;
+        const nextColor =
+          updates.color != null ? sanitizeTimerColor(updates.color, index) : group.color;
+        return { ...group, name: nextName || group.name, color: nextColor };
+      })
+    );
+  }
+
+  function addAbsTimer(groupId: string, label: string, whenTs: string) {
     if (!whenTs) return;
     const ts = new Date(whenTs).getTime();
-    if (!Number.isNaN(ts))
-      setAbsTimers((prev) => [...prev, { id: crypto.randomUUID(), label, ts }]);
+    if (Number.isNaN(ts)) return;
+    const targetGroup = absGroups.some((g) => g.id === groupId) ? groupId : fallbackGroupId;
+    setAbsTimers((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), label, ts, groupId: targetGroup, status: "active" },
+    ]);
   }
-  function deleteAbs(id: string) {
+
+  function updateAbsTimer(
+    id: string,
+    updates: { label?: string; ts?: number; groupId?: string }
+  ) {
+    setAbsTimers((prev) =>
+      prev.map((timer) => {
+        if (timer.id !== id) return timer;
+        let nextGroupId = timer.groupId;
+        if (updates.groupId && absGroups.some((g) => g.id === updates.groupId))
+          nextGroupId = updates.groupId;
+        else if (!absGroups.some((g) => g.id === nextGroupId)) nextGroupId = fallbackGroupId;
+        const next: AbsTimer = { ...timer, groupId: nextGroupId };
+        if (updates.label != null) next.label = updates.label;
+        const tsUpdate = updates.ts;
+        if (tsUpdate != null && Number.isFinite(tsUpdate)) next.ts = tsUpdate;
+        return next;
+      })
+    );
+  }
+
+  function setAbsTimerStatus(id: string, status: AbsTimerStatus) {
+    setAbsTimers((prev) => prev.map((timer) => (timer.id === id ? { ...timer, status } : timer)));
+  }
+
+  function deleteAbsTimer(id: string) {
     setAbsTimers((prev) => prev.filter((x) => x.id !== id));
   }
 
@@ -1957,7 +2459,7 @@ export default function UmaResourceTracker() {
         <div style={{ marginTop: 12 }}>
           <TimerOverviewList
             timers={timerSummary}
-            absTimers={absTimers}
+            absTimers={decoratedAbsTimers}
             timeZone={activeTimeZone}
           />
         </div>
@@ -2070,34 +2572,29 @@ export default function UmaResourceTracker() {
       </Card>
 
       <Card title="Exact Date/Time Timers">
-        <AddAbsTimerForm onAdd={addAbsTimer} />
-        <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12 }}>
-          {absTimers.length === 0 ? (
-            <p style={{ color: COLOR.subtle, fontSize: 14 }}>No exact timers yet.</p>
-          ) : (
-            absTimers.map((a) => {
-              const rem = a.ts - now();
-              return (
-                <div key={a.id} style={cardRowStyle()}>
-                  <div>
-                    <div style={{ fontWeight: 600 }}>{a.label || "Timer"}</div>
-                    <div style={{ fontSize: 13, color: COLOR.subtle }}>
-                      At: {new Date(a.ts).toLocaleString(undefined, { timeZone: activeTimeZone })}
-                    </div>
-                    <div style={{ fontSize: 14 }}>
-                      Time left: {formatDHMS(rem)} ({formatMMSS(rem)})
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <SmallBtn onClick={() => copyOverlayURL("abs", a.id)}>Copy Overlay URL</SmallBtn>
-                    <SmallBtn danger onClick={() => deleteAbs(a.id)}>
-                      Delete
-                    </SmallBtn>
-                  </div>
-                </div>
-              );
-            })
-          )}
+        <div style={{ display: "grid", gap: 12 }}>
+          <AddGroupForm onAdd={addAbsGroup} defaultColor={nextGroupColor} />
+          <AddAbsTimerForm
+            onAdd={addAbsTimer}
+            groups={groupsForForms}
+            defaultGroupId={formDefaultGroupId}
+          />
+        </div>
+        <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
+          {groupsForForms.map((group) => (
+            <AbsTimerGroupSection
+              key={group.id}
+              group={group}
+              timers={timersByGroup.get(group.id) ?? []}
+              groups={groupsForForms}
+              onUpdateGroup={editAbsGroup}
+              onUpdateTimer={updateAbsTimer}
+              onStatusChange={setAbsTimerStatus}
+              onDeleteTimer={deleteAbsTimer}
+              onCopyOverlay={(id) => copyOverlayURL("abs", id)}
+              timeZone={activeTimeZone}
+            />
+          ))}
         </div>
       </Card>
 
