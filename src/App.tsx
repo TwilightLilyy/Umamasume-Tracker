@@ -1172,7 +1172,7 @@ function ResourceCard({
 }
 
 interface AddTimerFormProps {
-  onAdd: (label: string, duration: string, color: string) => void;
+  onAdd: (label: string, duration: string, color: string, includeInOverview: boolean) => void;
   defaultColor: string;
 }
 
@@ -1180,6 +1180,7 @@ function AddTimerForm({ onAdd, defaultColor }: AddTimerFormProps) {
   const [label, setLabel] = useState("");
   const [dur, setDur] = useState("");
   const [color, setColor] = useState(defaultColor);
+  const [includeOverview, setIncludeOverview] = useState(true);
   const place = "mm:ss, 10m, 2h, or seconds";
 
   useEffect(() => {
@@ -1227,12 +1228,18 @@ function AddTimerForm({ onAdd, defaultColor }: AddTimerFormProps) {
           }}
         />
       </label>
+      <Checkbox
+        checked={includeOverview}
+        onChange={setIncludeOverview}
+        label="Include in overview"
+      />
       <SmallBtn
         onClick={() => {
-          onAdd(label, dur, color);
+          onAdd(label, dur, color, includeOverview);
           setLabel("");
           setDur("");
           setColor(defaultColor);
+          setIncludeOverview(true);
         }}
       >
         Add
@@ -1611,6 +1618,7 @@ interface TimerData {
   color?: string;
   durationMs?: number;
   remainingMs?: number;
+  includeInOverview?: boolean;
 }
 
 interface TimerDisplayData extends TimerData {
@@ -1618,6 +1626,7 @@ interface TimerDisplayData extends TimerData {
   totalMs: number;
   progress: number;
   colorResolved: string;
+  includeInOverview: boolean;
 }
 
 function computeTimerRemainingMs(t: TimerData, nowMs: number) {
@@ -1663,9 +1672,20 @@ interface TimerRowProps {
   onDelete: () => void;
   onCopy: () => void;
   onColorChange: (color: string) => void;
+  onToggleOverview: (include: boolean) => void;
 }
 
-function TimerRow({ t, meta, onAddMinutes, onPause, onReset, onDelete, onCopy, onColorChange }: TimerRowProps) {
+function TimerRow({
+  t,
+  meta,
+  onAddMinutes,
+  onPause,
+  onReset,
+  onDelete,
+  onCopy,
+  onColorChange,
+  onToggleOverview,
+}: TimerRowProps) {
   const remaining = meta.remainingMs;
   const statusLabel = t.isPaused
     ? `Paused (${formatDHMS(remaining)})`
@@ -1747,6 +1767,11 @@ function TimerRow({ t, meta, onAddMinutes, onPause, onReset, onDelete, onCopy, o
         <SmallBtn danger onClick={onDelete}>
           Delete
         </SmallBtn>
+        <Checkbox
+          checked={meta.includeInOverview}
+          onChange={onToggleOverview}
+          label="Include in overview"
+        />
       </div>
     </div>
   );
@@ -1762,7 +1787,7 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
   if (!timers.length && !absTimers.length)
     return (
       <p style={{ color: COLOR.subtle, fontSize: 13, marginTop: 6, marginBottom: 0 }}>
-        No timers yet.
+        No timers selected for overview yet.
       </p>
     );
 
@@ -2272,6 +2297,7 @@ export default function UmaResourceTracker() {
             created: nowMs,
             color: defaultTimerColor(index),
             durationMs: 0,
+            includeInOverview: true,
           };
         const rem = Number.isFinite(t.remainingMs) ? (t.remainingMs as number) : 0;
         const hasTarget = Number.isFinite(t.targetTs);
@@ -2286,10 +2312,12 @@ export default function UmaResourceTracker() {
         const duration = Number.isFinite(t.durationMs)
           ? Math.max(0, t.durationMs as number)
           : computeTimerTotalMs(candidate, remaining, nowMs);
+        const includeInOverview = t.includeInOverview !== false;
         return {
           ...candidate,
           color: sanitizeTimerColor(candidate.color, index),
           durationMs: duration,
+          includeInOverview,
         };
       })
     );
@@ -2303,7 +2331,15 @@ export default function UmaResourceTracker() {
       const total = computeTimerTotalMs(t, remaining, nowMs);
       const colorResolved = resolveTimerColor(t, index);
       const progress = total > 0 ? clamp(1 - remaining / total, 0, 1) : 1;
-      return { ...t, remainingMs: remaining, totalMs: total, progress, colorResolved } as TimerDisplayData;
+      const includeInOverview = t.includeInOverview !== false;
+      return {
+        ...t,
+        remainingMs: remaining,
+        totalMs: total,
+        progress,
+        colorResolved,
+        includeInOverview,
+      } as TimerDisplayData;
     });
   }, [timers, tick]);
 
@@ -2334,7 +2370,7 @@ export default function UmaResourceTracker() {
   }, [absTimers, absGroups, fallbackGroupId]);
 
   const timerSummary = useMemo(() => {
-    const arr = [...decoratedTimers];
+    const arr = decoratedTimers.filter((t) => t.includeInOverview);
     arr.sort((a, b) => {
       const weight = (x: TimerDisplayData) => {
         if (!x.isPaused && x.remainingMs > 0) return 0;
@@ -2618,7 +2654,12 @@ export default function UmaResourceTracker() {
     if (kind === "tp") setTP((prev) => ({ ...prev, nextOverride: target }));
     else setRP((prev) => ({ ...prev, nextOverride: target }));
   }
-  function addTimer(label: string, input: string, colorInput: string) {
+  function addTimer(
+    label: string,
+    input: string,
+    colorInput: string,
+    includeInOverview: boolean
+  ) {
     const ms = parseFlexible(input);
     if (ms == null) return;
     const nowMs = now();
@@ -2633,6 +2674,7 @@ export default function UmaResourceTracker() {
         created: nowMs,
         color,
         durationMs: ms,
+        includeInOverview: includeInOverview !== false,
       };
       return [...prev, t];
     });
@@ -2714,6 +2756,9 @@ export default function UmaResourceTracker() {
     setTimers((prev) =>
       prev.map((t, index) => (t.id === id ? { ...t, color: sanitizeTimerColor(colorInput, index) } : t))
     );
+  }
+  function setTimerIncludeInOverview(id: string, include: boolean) {
+    setTimers((prev) => prev.map((t) => (t.id === id ? { ...t, includeInOverview: include } : t)));
   }
   function deleteTimer(id: string) {
     setTimers((prev) => prev.filter((t) => t.id !== id));
@@ -3181,6 +3226,7 @@ export default function UmaResourceTracker() {
                 onDelete={() => deleteTimer(meta.id)}
                 onCopy={() => copyOverlayURL("timer", meta.id)}
                 onColorChange={(color) => changeTimerColor(meta.id, color)}
+                onToggleOverview={(include) => setTimerIncludeInOverview(meta.id, include)}
               />
             ))
           )}
