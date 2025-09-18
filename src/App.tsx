@@ -1362,7 +1362,7 @@ function TimerImportExportControls({ groups, timers, onImport }: TimerImportExpo
 }
 
 interface AddAbsTimerFormProps {
-  onAdd: (groupId: string, label: string, dateTime: string) => void;
+  onAdd: (groupId: string, label: string, dateTime: string, includeInOverview: boolean) => void;
   groups: AbsTimerGroup[];
   defaultGroupId: string;
 }
@@ -1371,6 +1371,7 @@ function AddAbsTimerForm({ onAdd, groups, defaultGroupId }: AddAbsTimerFormProps
   const [label, setLabel] = useState("");
   const [dt, setDt] = useState("");
   const [groupId, setGroupId] = useState(defaultGroupId);
+  const [includeInOverview, setIncludeInOverview] = useState(false);
 
   useEffect(() => {
     setGroupId((prev) => {
@@ -1390,12 +1391,18 @@ function AddAbsTimerForm({ onAdd, groups, defaultGroupId }: AddAbsTimerFormProps
           </option>
         ))}
       </Select>
+      <Checkbox
+        checked={includeInOverview}
+        onChange={setIncludeInOverview}
+        label="Include in overview"
+      />
       <SmallBtn
         onClick={() => {
-          onAdd(groupId, label, dt);
+          onAdd(groupId, label, dt, includeInOverview);
           setLabel("");
           setDt("");
           setGroupId(defaultGroupId);
+          setIncludeInOverview(false);
         }}
       >
         Add timer
@@ -1461,6 +1468,7 @@ interface AbsTimerItemProps {
   onStatusChange: (id: string, status: AbsTimerStatus) => void;
   onDelete: (id: string) => void;
   onCopyOverlay: () => void;
+  onToggleOverview: (id: string, include: boolean) => void;
   timeZone: string;
 }
 
@@ -1472,6 +1480,7 @@ function AbsTimerItem({
   onStatusChange,
   onDelete,
   onCopyOverlay,
+  onToggleOverview,
   timeZone,
 }: AbsTimerItemProps) {
   const [editing, setEditing] = useState(false);
@@ -1530,6 +1539,8 @@ function AbsTimerItem({
     statusColor = COLOR.danger;
   }
 
+  const includeInOverview = timer.includeInOverview === true;
+
   return (
     <div style={cardRowStyle(accent)}>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -1583,6 +1594,11 @@ function AbsTimerItem({
             </SmallBtn>
           </>
         )}
+        <Checkbox
+          checked={includeInOverview}
+          onChange={(v) => onToggleOverview(timer.id, v)}
+          label="Include in overview"
+        />
       </div>
     </div>
   );
@@ -1597,6 +1613,7 @@ interface AbsTimerGroupSectionProps {
   onStatusChange: (id: string, status: AbsTimerStatus) => void;
   onDeleteTimer: (id: string) => void;
   onCopyOverlay: (id: string) => void;
+  onToggleOverview: (id: string, include: boolean) => void;
   timeZone: string;
 }
 
@@ -1609,6 +1626,7 @@ function AbsTimerGroupSection({
   onStatusChange,
   onDeleteTimer,
   onCopyOverlay,
+  onToggleOverview,
   timeZone,
 }: AbsTimerGroupSectionProps) {
   const [editing, setEditing] = useState(false);
@@ -1704,6 +1722,7 @@ function AbsTimerGroupSection({
               onStatusChange={onStatusChange}
               onDelete={onDeleteTimer}
               onCopyOverlay={() => onCopyOverlay(timer.id)}
+              onToggleOverview={onToggleOverview}
               timeZone={timeZone}
             />
           ))}
@@ -1889,7 +1908,9 @@ interface TimerOverviewListProps {
 }
 
 function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListProps) {
-  if (!timers.length && !absTimers.length)
+  const selectedAbs = absTimers.filter((a) => a.includeInOverview);
+
+  if (!timers.length && !selectedAbs.length)
     return (
       <p style={{ color: COLOR.subtle, fontSize: 13, marginTop: 6, marginBottom: 0 }}>
         No timers selected for overview yet.
@@ -1898,7 +1919,7 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
 
   const zone = ensureTimeZone(timeZone);
   const nowMs = now();
-  const sortedAbs = [...absTimers].sort((a, b) => {
+  const sortedAbs = [...selectedAbs].sort((a, b) => {
     const weight = (t: AbsTimerDisplay) => {
       if (t.status === "active") return t.ts <= nowMs ? 1 : 0;
       if (t.status === "completed") return 2;
@@ -2080,11 +2101,13 @@ interface AbsTimer {
   ts: number;
   groupId: string;
   status?: AbsTimerStatus;
+  includeInOverview?: boolean;
 }
 
 interface AbsTimerDisplay extends AbsTimer {
   group: AbsTimerGroup;
   status: AbsTimerStatus;
+  includeInOverview: boolean;
 }
 
 interface TimerExportPayload {
@@ -2098,6 +2121,7 @@ interface TimerExportPayload {
     status: AbsTimerStatus;
     groupId: string;
     groupName: string;
+    includeInOverview: boolean;
   }[];
 }
 
@@ -2114,6 +2138,7 @@ interface TimerImportTimerData {
   groupId?: string;
   groupName?: string;
   status: AbsTimerStatus;
+  includeInOverview?: boolean;
 }
 
 interface TimerImportBundle {
@@ -2145,6 +2170,7 @@ function createTimerExportPayload(groups: AbsTimerGroup[], timers: AbsTimer[]): 
       status,
       groupId: group?.id ?? t.groupId,
       groupName: group?.name ?? "",
+      includeInOverview: t.includeInOverview === true,
     };
   });
   return {
@@ -2185,6 +2211,11 @@ function sanitizeTimerImportData(value: unknown): TimerImportBundle | null {
     const status = validStatus.has(statusRaw as AbsTimerStatus)
       ? (statusRaw as AbsTimerStatus)
       : "active";
+    const includeRaw = (t as Record<string, unknown>).includeInOverview;
+    let includeInOverview = false;
+    if (typeof includeRaw === "boolean") includeInOverview = includeRaw;
+    else if (typeof includeRaw === "string")
+      includeInOverview = includeRaw.trim().toLowerCase() === "true";
     timers.push({
       id: typeof t.id === "string" ? t.id.trim() || undefined : undefined,
       label,
@@ -2192,6 +2223,7 @@ function sanitizeTimerImportData(value: unknown): TimerImportBundle | null {
       groupId: groupId && groupId.length ? groupId : undefined,
       groupName: groupName && groupName.length ? groupName : undefined,
       status,
+      includeInOverview,
     });
   });
   if (!groups.length && !timers.length) return null;
@@ -2297,6 +2329,7 @@ function prepareImportedTimers(
       ts: timer.ts,
       groupId: targetGroupId,
       status,
+      includeInOverview: timer.includeInOverview === true,
     });
   });
   return result;
@@ -2702,7 +2735,8 @@ export default function UmaResourceTracker() {
       const group = byId.get(t.groupId) ?? fallbackGroup;
       const status: AbsTimerStatus =
         t.status === "completed" || t.status === "expired" ? t.status : "active";
-      return { ...t, group, status };
+      const includeInOverview = t.includeInOverview === true;
+      return { ...t, group, status, includeInOverview };
     });
   }, [absTimers, absGroups, fallbackGroupId]);
 
@@ -3120,14 +3154,26 @@ export default function UmaResourceTracker() {
     );
   }
 
-  function addAbsTimer(groupId: string, label: string, whenTs: string) {
+  function addAbsTimer(
+    groupId: string,
+    label: string,
+    whenTs: string,
+    includeInOverview: boolean
+  ) {
     if (!whenTs) return;
     const ts = new Date(whenTs).getTime();
     if (Number.isNaN(ts)) return;
     const targetGroup = absGroups.some((g) => g.id === groupId) ? groupId : fallbackGroupId;
     setAbsTimers((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), label, ts, groupId: targetGroup, status: "active" },
+      {
+        id: crypto.randomUUID(),
+        label,
+        ts,
+        groupId: targetGroup,
+        status: "active",
+        includeInOverview: includeInOverview === true,
+      },
     ]);
   }
 
@@ -3153,6 +3199,14 @@ export default function UmaResourceTracker() {
 
   function setAbsTimerStatus(id: string, status: AbsTimerStatus) {
     setAbsTimers((prev) => prev.map((timer) => (timer.id === id ? { ...timer, status } : timer)));
+  }
+
+  function setAbsTimerIncludeInOverview(id: string, include: boolean) {
+    setAbsTimers((prev) =>
+      prev.map((timer) =>
+        timer.id === id ? { ...timer, includeInOverview: include ? true : false } : timer
+      )
+    );
   }
 
   function deleteAbsTimer(id: string) {
@@ -3628,6 +3682,7 @@ export default function UmaResourceTracker() {
               onStatusChange={setAbsTimerStatus}
               onDeleteTimer={deleteAbsTimer}
               onCopyOverlay={(id) => copyOverlayURL("abs", id)}
+              onToggleOverview={setAbsTimerIncludeInOverview}
               timeZone={activeTimeZone}
             />
           ))}
