@@ -660,14 +660,14 @@ function Card({ title, children }: CardProps) {
           0.97
         )} 100%)`,
         border: `1px solid ${withAlpha(mixColor(COLOR.border, "#000000", 0.35), 0.85)}`,
-        borderRadius: 16,
-        padding: 16,
-        boxShadow: `0 18px 40px ${withAlpha(mixColor(COLOR.card, "#000000", 0.55), 0.5)}`,
-        marginBottom: 16,
+        borderRadius: 14,
+        padding: 14,
+        boxShadow: `0 14px 32px ${withAlpha(mixColor(COLOR.card, "#000000", 0.55), 0.45)}`,
+        marginBottom: 12,
         color: COLOR.text,
       }}
     >
-      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>{title}</div>
+      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>{title}</div>
       {children}
     </div>
   );
@@ -675,7 +675,7 @@ function Card({ title, children }: CardProps) {
 
 function RowRight({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
       {children}
     </div>
   );
@@ -734,11 +734,11 @@ function ProgressBar({ value, max, color }: ProgressBarProps) {
     <div
       style={{
         width: "100%",
-        height: 10,
+        height: 8,
         background: track,
         borderRadius: 999,
         overflow: "hidden",
-        boxShadow: `inset 0 0 8px ${withAlpha("#000000", 0.35)}`,
+        boxShadow: `inset 0 0 6px ${withAlpha("#000000", 0.3)}`,
       }}
     >
       <div
@@ -770,13 +770,13 @@ function SmallBtn({ onClick, children, danger, disabled }: SmallBtnProps) {
       onClick={onClick}
       disabled={disabled}
       style={{
-        padding: "6px 10px",
+        padding: "5px 9px",
         fontSize: 12,
-        borderRadius: 10,
+        borderRadius: 9,
         background: `linear-gradient(135deg, ${withAlpha(highlight, 0.95)} 0%, ${withAlpha(shadow, 0.95)} 100%)`,
         color: COLOR.text,
         border: `1px solid ${withAlpha(mixColor(base, "#000000", 0.2), 0.9)}`,
-        boxShadow: `0 8px 18px ${withAlpha(base, 0.28)}`,
+        boxShadow: `0 6px 16px ${withAlpha(base, 0.26)}`,
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.6 : 1,
         filter: disabled ? "grayscale(0.15)" : undefined,
@@ -803,8 +803,8 @@ function Input({ value, onChange, placeholder, type = "text" }: InputProps) {
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       style={{
-        padding: "8px 12px",
-        borderRadius: 12,
+        padding: "6px 10px",
+        borderRadius: 10,
         background: `linear-gradient(135deg, ${withAlpha(mixColor(COLOR.bg, "#ffffff", 0.08), 0.9)} 0%, ${withAlpha(
           mixColor(COLOR.bg, "#000000", 0.4),
           0.95
@@ -812,7 +812,7 @@ function Input({ value, onChange, placeholder, type = "text" }: InputProps) {
         color: COLOR.text,
         border: `1px solid ${withAlpha(COLOR.border, 0.85)}`,
         width: "100%",
-        boxShadow: `0 6px 18px ${withAlpha("#000000", 0.3)}`,
+        boxShadow: `0 4px 14px ${withAlpha("#000000", 0.28)}`,
       }}
     />
   );
@@ -844,8 +844,8 @@ function Select({ value, onChange, children }: SelectProps) {
       value={value}
       onChange={(e) => onChange(e.target.value)}
       style={{
-        padding: "8px 12px",
-        borderRadius: 12,
+        padding: "6px 10px",
+        borderRadius: 10,
         background: `linear-gradient(135deg, ${withAlpha(mixColor(COLOR.bg, "#ffffff", 0.08), 0.9)} 0%, ${withAlpha(
           mixColor(COLOR.bg, "#000000", 0.4),
           0.95
@@ -853,8 +853,8 @@ function Select({ value, onChange, children }: SelectProps) {
         backgroundColor: optionBackground,
         color: COLOR.text,
         border: `1px solid ${withAlpha(COLOR.border, 0.85)}`,
-        boxShadow: `0 6px 18px ${withAlpha("#000000", 0.3)}`,
-        minWidth: 160,
+        boxShadow: `0 4px 14px ${withAlpha("#000000", 0.28)}`,
+        minWidth: 150,
       }}
     >
       {styledChildren}
@@ -920,14 +920,14 @@ function KeyCapture({ binding, capturing, onStartCapture, onStopCapture, onBindi
       disabled={disabled}
       title="Click, then press a key. Press Esc to cancel."
       style={{
-        padding: "8px 12px",
-        borderRadius: 12,
+        padding: "6px 10px",
+        borderRadius: 10,
         border: `1px solid ${withAlpha(COLOR.border, 0.85)}`,
         background: capturing ? activeBackground : idleBackground,
         color: COLOR.text,
-        minWidth: 150,
+        minWidth: 140,
         textAlign: "left",
-        boxShadow: `0 6px 18px ${withAlpha("#000000", 0.3)}`,
+        boxShadow: `0 4px 14px ${withAlpha("#000000", 0.28)}`,
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.6 : 1,
         fontSize: 12,
@@ -1055,7 +1055,7 @@ function ResourceCard({
     fontWeight: 800,
     letterSpacing: 0.5,
     color: accent,
-    fontSize: hud ? 48 : 32,
+    fontSize: hud ? 44 : 28,
   };
 
   return (
@@ -1063,9 +1063,9 @@ function ResourceCard({
       style={{
         background: COLOR.card,
         border: `1px solid ${COLOR.border}`,
-        borderRadius: 16,
-        padding: 16,
-        boxShadow: "0 6px 24px rgba(0,0,0,.25)",
+        borderRadius: 14,
+        padding: 12,
+        boxShadow: "0 4px 18px rgba(0,0,0,.22)",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -1075,13 +1075,13 @@ function ResourceCard({
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
         <div style={bigValStyle}>{current.value}</div>
         <ProgressBar value={current.value} max={cap} color={accent} />
       </div>
 
       {hud ? (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
           <SmallBtn onClick={onMinus}>-1</SmallBtn>
           <SmallBtn onClick={onPlus}>+1</SmallBtn>
           {onSpend30 && <SmallBtn onClick={() => onSpend30()}>Spend 30</SmallBtn>}
@@ -1090,7 +1090,7 @@ function ResourceCard({
         </div>
       ) : (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
             <SmallBtn onClick={onMinus}>-1</SmallBtn>
             <SmallBtn onClick={onPlus}>+1</SmallBtn>
             {onSpend30 && (
@@ -1099,17 +1099,17 @@ function ResourceCard({
             {onUseOne && <SmallBtn onClick={() => onUseOne()}>Use 1 {name}</SmallBtn>}
           </div>
 
-          <div style={{ color: COLOR.subtle, fontSize: 13, marginTop: 8 }}>
+          <div style={{ color: COLOR.subtle, fontSize: 13, marginTop: 6 }}>
             Next +1 in: {formatDHMS(timeToNext)} ({formatMMSS(timeToNext)})
           </div>
-          <div style={{ fontSize: 13, marginTop: 2 }}>
+          <div style={{ fontSize: 13, marginTop: 4 }}>
             Full at: {new Date(current.fullAt).toLocaleString(undefined, { timeZone: zone })} • Time to full:
             {" "}
             {formatDHMS(fullInfo.ms)} ({formatMMSS(fullInfo.ms)})
           </div>
 
           {milestones.length > 0 && (
-            <div style={{ borderTop: `1px solid ${COLOR.border}`, marginTop: 10, paddingTop: 8 }}>
+            <div style={{ borderTop: `1px solid ${COLOR.border}`, marginTop: 8, paddingTop: 6 }}>
               <div style={{ fontSize: 13, fontWeight: 600 }}>Milestones</div>
               <ul style={{ fontSize: 13, marginTop: 4, display: "grid", gap: 4 }}>
                 {milestones.map((m) => {
@@ -1137,9 +1137,9 @@ function ResourceCard({
             </div>
           )}
 
-          <div style={{ marginTop: 10 }}>
+          <div style={{ marginTop: 8 }}>
             <div style={{ fontSize: 13 }}>Set time until next {name}:</div>
-            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
               <Input placeholder={place} value={nextInput} onChange={setNextInput} />
               <SmallBtn
                 onClick={() => {
@@ -1151,9 +1151,9 @@ function ResourceCard({
               </SmallBtn>
             </div>
           </div>
-          <div style={{ marginTop: 10 }}>
+          <div style={{ marginTop: 8 }}>
             <div style={{ fontSize: 13 }}>Set current {name} amount:</div>
-            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
               <Input placeholder={`0–${cap}`} value={amountInput} onChange={setAmountInput} />
               <SmallBtn
                 onClick={() => {
@@ -1203,9 +1203,9 @@ function AddTimerForm({ onAdd, defaultColor }: AddTimerFormProps) {
       <Input placeholder={place} value={dur} onChange={setDur} />
       <label
         style={{
-          width: 48,
-          height: 40,
-          borderRadius: 12,
+          width: 44,
+          height: 36,
+          borderRadius: 10,
           border: `1px solid ${COLOR.border}`,
           background: COLOR.bg,
           display: "flex",
@@ -1218,8 +1218,8 @@ function AddTimerForm({ onAdd, defaultColor }: AddTimerFormProps) {
       >
         <span
           style={{
-            width: 20,
-            height: 20,
+            width: 18,
+            height: 18,
             borderRadius: "50%",
             background: color,
             border: `1px solid ${COLOR.border}`,
@@ -1638,11 +1638,11 @@ function AbsTimerGroupSection({
       style={{
         background: COLOR.card,
         border: `1px solid ${COLOR.border}`,
-        borderRadius: 16,
-        padding: 16,
-        boxShadow: "0 6px 24px rgba(0,0,0,.25)",
+        borderRadius: 14,
+        padding: 14,
+        boxShadow: "0 4px 18px rgba(0,0,0,.22)",
         display: "grid",
-        gap: 12,
+        gap: 10,
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -1841,12 +1841,12 @@ function TimerRow({
         </div>
         <div
           style={{
-            marginTop: 10,
-            height: 6,
+            marginTop: 6,
+            height: 4,
             background: track,
             borderRadius: 999,
             overflow: "hidden",
-            boxShadow: `inset 0 0 6px ${withAlpha("#000000", 0.3)}`,
+            boxShadow: `inset 0 0 4px ${withAlpha("#000000", 0.28)}`,
           }}
         >
           <div
@@ -1859,7 +1859,7 @@ function TimerRow({
           />
         </div>
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
         <SmallBtn onClick={() => onAddMinutes(1)}>+1m</SmallBtn>
         <SmallBtn onClick={() => onAddMinutes(5)}>+5m</SmallBtn>
         {t.isPaused ? (
@@ -1910,127 +1910,140 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
     return a.ts - b.ts;
   });
 
+  const sectionStyle: React.CSSProperties = { display: "grid", gap: 6 };
+  const listStyle: React.CSSProperties = {
+    display: "grid",
+    gap: 8,
+    gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+  };
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <div style={{ display: "grid", gap: 12 }}>
       {timers.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={sectionStyle}>
           <div style={{ fontSize: 13, color: COLOR.subtle }}>Custom flexible timers</div>
-          {timers.map((t) => {
-            const label = t.label || "Timer";
-            const status = t.isPaused
-              ? `Paused (${formatDHMS(t.remainingMs)})`
-              : t.remainingMs <= 0
-              ? "Ready"
-              : `${formatDHMS(t.remainingMs)} (${formatMMSS(t.remainingMs)})`;
-            const accent = t.colorResolved;
-            const gradient = `linear-gradient(140deg, ${withAlpha(mixColor(accent, COLOR.bg, 0.4), 0.97)} 0%, ${withAlpha(
-              mixColor(accent, "#000000", 0.55),
-              0.97
-            )} 100%)`;
-            const borderColor = withAlpha(mixColor(accent, "#000000", 0.55), 0.88);
-            const statusColor = mixColor(accent, "#ffffff", 0.2);
-            const progressColor = mixColor(accent, "#ffffff", 0.15);
-            const progressTrack = withAlpha(mixColor(accent, COLOR.bg, 0.65), 0.45);
-            const shadow = withAlpha(mixColor(accent, "#000000", 0.45), 0.45);
-            return (
-              <div
-                key={t.id}
-                style={{
-                  background: gradient,
-                  border: `1px solid ${borderColor}`,
-                  borderRadius: 12,
-                  padding: 12,
-                  boxShadow: `0 12px 24px ${shadow}`,
-                  color: COLOR.text,
-                }}
-              >
+          <div style={listStyle}>
+            {timers.map((t) => {
+              const label = t.label || "Timer";
+              const status = t.isPaused
+                ? `Paused (${formatDHMS(t.remainingMs)})`
+                : t.remainingMs <= 0
+                ? "Ready"
+                : `${formatDHMS(t.remainingMs)} (${formatMMSS(t.remainingMs)})`;
+              const accent = t.colorResolved;
+              const gradient = `linear-gradient(140deg, ${withAlpha(mixColor(accent, COLOR.bg, 0.4), 0.97)} 0%, ${withAlpha(
+                mixColor(accent, "#000000", 0.55),
+                0.97
+              )} 100%)`;
+              const borderColor = withAlpha(mixColor(accent, "#000000", 0.55), 0.88);
+              const statusColor = mixColor(accent, "#ffffff", 0.2);
+              const progressColor = mixColor(accent, "#ffffff", 0.15);
+              const progressTrack = withAlpha(mixColor(accent, COLOR.bg, 0.65), 0.45);
+              const shadow = withAlpha(mixColor(accent, "#000000", 0.45), 0.45);
+              return (
                 <div
+                  key={t.id}
                   style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
-                    <span
-                      style={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: "50%",
-                        background: t.colorResolved,
-                        border: `1px solid ${withAlpha(COLOR.border, 0.85)}`,
-                        boxShadow: "0 0 4px rgba(0,0,0,0.45)",
-                      }}
-                    />
-                    <span style={{ wordBreak: "break-word" }}>{label}</span>
-                  </span>
-                  <span style={{ color: statusColor, fontSize: 12 }}>{status}</span>
-                </div>
-                <div
-                  style={{
-                    marginTop: 6,
-                    height: 4,
-                    background: progressTrack,
-                    borderRadius: 999,
-                    overflow: "hidden",
-                    boxShadow: `inset 0 0 4px ${withAlpha("#000000", 0.35)}`,
+                    background: gradient,
+                    border: `1px solid ${borderColor}`,
+                    borderRadius: 10,
+                    padding: 10,
+                    boxShadow: `0 10px 22px ${shadow}`,
+                    color: COLOR.text,
+                    display: "grid",
+                    gap: 6,
+                    height: "100%",
                   }}
                 >
                   <div
                     style={{
-                      width: `${t.progress * 100}%`,
-                      background: progressColor,
-                      height: "100%",
-                      transition: "width 0.3s ease",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 6,
                     }}
-                  />
+                  >
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
+                      <span
+                        style={{
+                          width: 10,
+                          height: 10,
+                          borderRadius: "50%",
+                          background: t.colorResolved,
+                          border: `1px solid ${withAlpha(COLOR.border, 0.85)}`,
+                          boxShadow: "0 0 4px rgba(0,0,0,0.45)",
+                        }}
+                      />
+                      <span style={{ wordBreak: "break-word" }}>{label}</span>
+                    </span>
+                    <span style={{ color: statusColor, fontSize: 12 }}>{status}</span>
+                  </div>
+                  <div
+                    style={{
+                      height: 4,
+                      background: progressTrack,
+                      borderRadius: 999,
+                      overflow: "hidden",
+                      boxShadow: `inset 0 0 4px ${withAlpha("#000000", 0.35)}`,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${t.progress * 100}%`,
+                        background: progressColor,
+                        height: "100%",
+                        transition: "width 0.3s ease",
+                      }}
+                    />
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 
       {sortedAbs.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={sectionStyle}>
           <div style={{ fontSize: 13, color: COLOR.subtle }}>Exact date/time timers</div>
-          {sortedAbs.map((a) => {
-            const rem = a.ts - nowMs;
-            const accent = a.group.color;
-            const timeLine =
-              rem > 0
-                ? `Time left: ${formatDHMS(rem)} (${formatMMSS(rem)})`
-                : `Ended ${formatDHMS(-rem)} ago`;
-            const statusText =
-              a.status === "completed"
-                ? "Completed"
-                : a.status === "expired"
-                ? "Expired"
-                : rem <= 0
-                ? "Ended"
-                : "Active";
-            const statusColor =
-              a.status === "completed"
-                ? COLOR.good
-                : a.status === "expired" || rem <= 0
-                ? COLOR.danger
-                : mixColor(accent, "#ffffff", 0.2);
-            const timelineColor = mixColor(accent, "#ffffff", 0.2);
-            return (
-              <div key={a.id} style={cardRowStyle(accent)}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div style={{ fontWeight: 600 }}>{a.label || "Timer"}</div>
-                  <div style={{ fontSize: 12, color: COLOR.subtle }}>{a.group.name}</div>
-                  <div style={{ fontSize: 13, color: COLOR.subtle }}>
-                    <span>At: {new Date(a.ts).toLocaleString(undefined, { timeZone: zone })}</span>
+          <div style={listStyle}>
+            {sortedAbs.map((a) => {
+              const rem = a.ts - nowMs;
+              const accent = a.group.color;
+              const timeLine =
+                rem > 0
+                  ? `Time left: ${formatDHMS(rem)} (${formatMMSS(rem)})`
+                  : `Ended ${formatDHMS(-rem)} ago`;
+              const statusText =
+                a.status === "completed"
+                  ? "Completed"
+                  : a.status === "expired"
+                  ? "Expired"
+                  : rem <= 0
+                  ? "Ended"
+                  : "Active";
+              const statusColor =
+                a.status === "completed"
+                  ? COLOR.good
+                  : a.status === "expired" || rem <= 0
+                  ? COLOR.danger
+                  : mixColor(accent, "#ffffff", 0.2);
+              const timelineColor = mixColor(accent, "#ffffff", 0.2);
+              return (
+                <div key={a.id} style={cardRowStyle(accent)}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div style={{ fontWeight: 600 }}>{a.label || "Timer"}</div>
+                    <div style={{ fontSize: 12, color: COLOR.subtle }}>{a.group.name}</div>
+                    <div style={{ fontSize: 13, color: COLOR.subtle }}>
+                      <span>At: {new Date(a.ts).toLocaleString(undefined, { timeZone: zone })}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: timelineColor }}>{timeLine}</div>
+                    <div style={{ fontSize: 12, color: statusColor }}>Status: {statusText}</div>
                   </div>
-                  <div style={{ marginTop: 6, fontSize: 12, color: timelineColor }}>{timeLine}</div>
-                  <div style={{ fontSize: 12, color: statusColor }}>Status: {statusText}</div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -2047,16 +2060,17 @@ function cardRowStyle(accent?: string): React.CSSProperties {
   return {
     background: `linear-gradient(140deg, ${gradStart} 0%, ${gradEnd} 100%)`,
     border: `1px solid ${borderColor}`,
-    borderRadius: 16,
+    borderRadius: 14,
     color: COLOR.text,
-    padding: 12,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    borderLeft: accent ? `4px solid ${leftBorder}` : undefined,
-    paddingLeft: accent ? 16 : 12,
-    boxShadow: `0 12px 28px ${shadow}`,
+    padding: 10,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    alignItems: "start",
+    gap: 10,
+    borderLeft: accent ? `3px solid ${leftBorder}` : undefined,
+    paddingLeft: accent ? 14 : 10,
+    boxShadow: `0 10px 24px ${shadow}`,
+    height: "100%",
   };
 }
 
@@ -3184,6 +3198,9 @@ export default function UmaResourceTracker() {
     atReset: notif.dailyReset?.atReset !== false,
     hourBefore: notif.dailyReset?.hourBefore !== false,
   };
+  const resourceColumns = hud
+    ? "repeat(auto-fit, minmax(240px, 1fr))"
+    : "repeat(auto-fit, minmax(300px, 1fr))";
 
   useEffect(() => {
     if (!hotkeysActive) return;
@@ -3291,7 +3308,7 @@ export default function UmaResourceTracker() {
   }
 
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16, color: COLOR.text }}>
+    <div style={{ maxWidth: 1200, margin: "0 auto", padding: "12px 8px 28px", color: COLOR.text }}>
       <Header
         hud={hud}
         onOpenSettings={toggleSettings}
@@ -3423,7 +3440,7 @@ export default function UmaResourceTracker() {
         </Card>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: hud ? "1fr 1fr" : "1fr 1fr", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: resourceColumns, gap: 12 }}>
         <ResourceCard
           accent={COLOR.tp}
           name="TP"
@@ -3617,7 +3634,7 @@ export default function UmaResourceTracker() {
         </div>
       </Card>
 
-      <footer style={{ color: COLOR.subtle, fontSize: 12, paddingTop: 24, paddingBottom: 16 }}>
+      <footer style={{ color: COLOR.subtle, fontSize: 12, paddingTop: 16, paddingBottom: 12 }}>
         Streamer HUD: add <code>?hud=1</code> to the URL for compact panels. Overlay links: each card has a "Copy
         Overlay URL" to render a minimal scene for OBS as a browser source. Inputs accept "mm:ss, 10m, 2h, or seconds".
       </footer>
