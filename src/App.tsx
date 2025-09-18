@@ -873,12 +873,17 @@ interface NotificationState {
   tpMilestones: Record<string, boolean>;
   rpMilestones: Record<string, boolean>;
   timers: boolean;
+  dailyReset?: {
+    atReset?: boolean;
+    hourBefore?: boolean;
+  };
 }
 
 interface FiredState {
   tp: Record<string, boolean>;
   rp: Record<string, boolean>;
   timers: Record<string, boolean>;
+  resets?: Record<string, boolean>;
 }
 
 function maybeFire(
@@ -920,6 +925,20 @@ function maybeFireAbs(
   setFired((prev) => ({ ...prev, timers: { ...prev.timers, [id]: true } }));
 }
 
+function maybeFireReset(
+  key: string,
+  title: string,
+  body: string,
+  condition: boolean,
+  fired: FiredState,
+  setFired: SetState<FiredState>
+) {
+  if (!condition) return;
+  if (fired.resets?.[key]) return;
+  notify(title, body);
+  setFired((prev) => ({ ...prev, resets: { ...prev.resets, [key]: true } }));
+}
+
 const TP_RATE_MS = 10 * 60 * 1000;
 const TP_CAP = 100;
 const RP_RATE_MS = 2 * 60 * 60 * 1000;
@@ -941,6 +960,7 @@ export default function UmaResourceTracker() {
     tpMilestones: { "30": true, "60": true, "90": true, full: true },
     rpMilestones: { full: true },
     timers: true,
+    dailyReset: { atReset: true, hourBefore: true },
   });
   const [timers, setTimers] = useLocalStorage<TimerData[]>("uma.customTimers", []);
   const [absTimers, setAbsTimers] = useLocalStorage<AbsTimer[]>("uma.absTimers", []);
@@ -948,6 +968,7 @@ export default function UmaResourceTracker() {
     tp: {},
     rp: {},
     timers: {},
+    resets: {},
   });
 
   useEffect(() => {
@@ -1033,6 +1054,18 @@ export default function UmaResourceTracker() {
   }, [notif.enabled]);
 
   useEffect(() => {
+    setFired((prev) => {
+      const resets = prev.resets || {};
+      const prefix = `${nextReset}:`;
+      const nextResets = Object.fromEntries(
+        Object.entries(resets).filter(([key]) => key.startsWith(prefix))
+      );
+      if (Object.keys(nextResets).length === Object.keys(resets).length) return prev;
+      return { ...prev, resets: nextResets };
+    });
+  }, [nextReset, setFired]);
+
+  useEffect(() => {
     if (!notif.enabled) return;
     const tpVal = curTP.value;
     for (const m of [30, 60, 90])
@@ -1049,7 +1082,30 @@ export default function UmaResourceTracker() {
       for (const a of absTimers)
         if (a.ts <= now()) maybeFireAbs(a.id, a.label || "Timer", fired, setFired);
     }
-  }, [curTP.value, curRP.value, timers, absTimers, notif, fired, setFired]);
+    const dailyReset = {
+      atReset: notif.dailyReset?.atReset !== false,
+      hourBefore: notif.dailyReset?.hourBefore !== false,
+    };
+    const untilReset = nextReset - now();
+    if (dailyReset.hourBefore)
+      maybeFireReset(
+        `${nextReset}:hour`,
+        "Daily reset in 1 hour",
+        "One hour until daily reset.",
+        untilReset <= 3600000 && untilReset > 0,
+        fired,
+        setFired
+      );
+    if (dailyReset.atReset)
+      maybeFireReset(
+        `${nextReset}:reset`,
+        "Daily reset",
+        "Daily reset is live!",
+        untilReset <= 0,
+        fired,
+        setFired
+      );
+  }, [curTP.value, curRP.value, timers, absTimers, notif, fired, setFired, nextReset]);
 
   const tpMilestoneTimes = useMemo(
     () => milestoneTimes({ ...curTP, nextPoint: curTP.nextPoint }, TP_RATE_MS, [30, 60, 90]),
@@ -1152,6 +1208,10 @@ export default function UmaResourceTracker() {
   const q = useQuery();
   const hud = q.get("hud") === "1";
   const overlay = q.get("overlay");
+  const dailyResetSettings = {
+    atReset: notif.dailyReset?.atReset !== false,
+    hourBefore: notif.dailyReset?.hourBefore !== false,
+  };
 
   function copyOverlayURL(kind: string, id = "") {
     if (typeof window === "undefined") return;
@@ -1245,6 +1305,27 @@ export default function UmaResourceTracker() {
               }))
             }
             label="Full RP"
+          />
+          <Label>Daily reset:</Label>
+          <Checkbox
+            checked={dailyResetSettings.hourBefore}
+            onChange={(v) =>
+              setNotif((n) => ({
+                ...n,
+                dailyReset: { ...n.dailyReset, hourBefore: v },
+              }))
+            }
+            label="1h warning"
+          />
+          <Checkbox
+            checked={dailyResetSettings.atReset}
+            onChange={(v) =>
+              setNotif((n) => ({
+                ...n,
+                dailyReset: { ...n.dailyReset, atReset: v },
+              }))
+            }
+            label="At reset"
           />
           <Checkbox
             checked={notif.timers}
