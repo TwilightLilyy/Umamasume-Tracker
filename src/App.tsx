@@ -1,6 +1,19 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-const TZ = "America/Chicago";
+const DEFAULT_TZ = "America/Chicago";
+
+function isValidTimeZone(value: string) {
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function ensureTimeZone(value: string) {
+  return isValidTimeZone(value) ? value : DEFAULT_TZ;
+}
 const COLOR = {
   bg: "#0b1220",
   card: "#121a2a",
@@ -126,9 +139,10 @@ export function parseFlexible(input: unknown) {
 }
 
 function getTZOffsetDesignator(timeZone: string) {
+  const zone = ensureTimeZone(timeZone);
   try {
     const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone,
+      timeZone: zone,
       timeZoneName: "shortOffset",
     }).formatToParts(new Date());
     let off =
@@ -148,10 +162,11 @@ function getTZOffsetDesignator(timeZone: string) {
   return "-05:00";
 }
 
-export function nextDailyResetTS(base = new Date()) {
+export function nextDailyResetTS(base = new Date(), timeZone = DEFAULT_TZ) {
   const d = new Date(base);
+  const zone = ensureTimeZone(timeZone);
   const locale = new Intl.DateTimeFormat("en-US", {
-    timeZone: TZ,
+    timeZone: zone,
     hour12: false,
     year: "numeric",
     month: "2-digit",
@@ -161,7 +176,7 @@ export function nextDailyResetTS(base = new Date()) {
   const yyyy = parts.year;
   const mm = parts.month;
   const dd = parts.day;
-  const tzOff = getTZOffsetDesignator(TZ);
+  const tzOff = getTZOffsetDesignator(zone);
   let targetMs = new Date(`${yyyy}-${mm}-${dd}T10:00:00${tzOff}`).getTime();
   if (!Number.isFinite(targetMs)) {
     targetMs = new Date(`${yyyy}-${mm}-${dd}T10:00:00`).getTime() || Date.now();
@@ -333,17 +348,56 @@ function useQuery() {
 
 interface HeaderProps {
   hud: boolean;
+  onOpenSettings: () => void;
+  timeZone: string;
+  isSettingsOpen: boolean;
 }
 
-function Header({ hud }: HeaderProps) {
+function Header({ hud, onOpenSettings, timeZone, isSettingsOpen }: HeaderProps) {
+  const zone = ensureTimeZone(timeZone);
   return (
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ fontSize: hud ? 20 : 24, fontWeight: 700 }}>
-        Uma RP/TP Tracker — Streamer Build2
+    <div
+      style={{
+        marginBottom: 12,
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 12,
+        flexWrap: "wrap",
+      }}
+    >
+      <div>
+        <div style={{ fontSize: hud ? 20 : 24, fontWeight: 700 }}>
+          Uma RP/TP Tracker — Streamer Build2
+        </div>
+        <div style={{ color: COLOR.subtle, fontSize: 12 }}>
+          Dark theme • TP gold • RP blue • HUD mode & overlay URLs
+        </div>
+        <div style={{ color: COLOR.subtle, fontSize: 12, marginTop: 4 }}>
+          Current time zone: {zone}
+        </div>
       </div>
-      <div style={{ color: COLOR.subtle, fontSize: 12 }}>
-        Dark theme • TP gold • RP blue • HUD mode & overlay URLs
-      </div>
+      <button
+        type="button"
+        onClick={onOpenSettings}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "8px 12px",
+          borderRadius: 999,
+          background: isSettingsOpen ? COLOR.border : COLOR.slate700,
+          color: COLOR.text,
+          border: `1px solid ${COLOR.border}`,
+          fontSize: 13,
+          cursor: "pointer",
+        }}
+        title="Open settings"
+        aria-expanded={isSettingsOpen}
+      >
+        <span aria-hidden="true">⚙️</span>
+        <span>Settings</span>
+      </button>
     </div>
   );
 }
@@ -485,13 +539,14 @@ function Input({ value, onChange, placeholder, type = "text" }: InputProps) {
   );
 }
 
-function CountdownRow({ targetMs }: { targetMs: number }) {
+function CountdownRow({ targetMs, timeZone }: { targetMs: number; timeZone: string }) {
   const [, setTick] = useState(0);
   useEffect(() => {
     const id = window.setInterval(() => setTick((t) => t + 1), 1000);
     return () => window.clearInterval(id);
   }, []);
   const rem = Math.max(0, targetMs - now());
+  const zone = ensureTimeZone(timeZone);
   return (
     <div
       style={{
@@ -503,7 +558,7 @@ function CountdownRow({ targetMs }: { targetMs: number }) {
       }}
     >
       <div style={{ fontSize: 13, color: COLOR.subtle }}>
-        Absolute: {new Date(targetMs).toLocaleString(undefined, { timeZone: TZ })}
+        Absolute: {new Date(targetMs).toLocaleString(undefined, { timeZone: zone })}
       </div>
       <div style={{ fontSize: 14 }}>
         Time left: {formatDHMS(rem)} ({formatMMSS(rem)})
@@ -530,6 +585,7 @@ interface ResourceCardProps {
   onSetNextOverride: (value: string) => void;
   hud: boolean;
   onCopyOverlay: () => void;
+  timeZone: string;
 }
 
 function ResourceCard({
@@ -550,11 +606,13 @@ function ResourceCard({
   onSetNextOverride,
   hud,
   onCopyOverlay,
+  timeZone,
 }: ResourceCardProps) {
   const [nextInput, setNextInput] = useState("");
   const [amountInput, setAmountInput] = useState("");
   const timeToNext = current.nextPoint - now();
   const place = "mm:ss, 10m, 2h, or seconds";
+  const zone = ensureTimeZone(timeZone);
 
   const bigValStyle: React.CSSProperties = {
     fontWeight: 800,
@@ -608,7 +666,7 @@ function ResourceCard({
             Next +1 in: {formatDHMS(timeToNext)} ({formatMMSS(timeToNext)})
           </div>
           <div style={{ fontSize: 13, marginTop: 2 }}>
-            Full at: {new Date(current.fullAt).toLocaleString(undefined, { timeZone: TZ })} • Time to full:
+            Full at: {new Date(current.fullAt).toLocaleString(undefined, { timeZone: zone })} • Time to full:
             {" "}
             {formatDHMS(fullInfo.ms)} ({formatMMSS(fullInfo.ms)})
           </div>
@@ -632,7 +690,7 @@ function ResourceCard({
                         <span style={{ color: COLOR.good }}>Ready ✓</span>
                       ) : (
                         <span style={{ color: COLOR.subtle }}>
-                          {new Date(t).toLocaleTimeString([], { timeZone: TZ })}
+                          {new Date(t).toLocaleTimeString([], { timeZone: zone })}
                         </span>
                       )}
                     </li>
@@ -1029,9 +1087,10 @@ interface OverlayViewProps {
   nextReset: number;
   timers: TimerData[];
   absTimers: AbsTimer[];
+  timeZone: string;
 }
 
-function OverlayView({ overlay, curTP, curRP, tpFull, rpFull, nextReset, timers, absTimers }: OverlayViewProps) {
+function OverlayView({ overlay, curTP, curRP, tpFull, rpFull, nextReset, timers, absTimers, timeZone }: OverlayViewProps) {
   const [, setTick] = useState(0);
   useEffect(() => {
     const id = window.setInterval(() => setTick((t) => t + 1), 1000);
@@ -1043,6 +1102,7 @@ function OverlayView({ overlay, curTP, curRP, tpFull, rpFull, nextReset, timers,
   };
   const slab: React.CSSProperties = { fontSize: 64, fontWeight: 900, letterSpacing: 1 };
   const sub: React.CSSProperties = { fontSize: 16, color: COLOR.subtle };
+  const zone = ensureTimeZone(timeZone);
 
   if (overlay === "tp")
     return (
@@ -1066,7 +1126,7 @@ function OverlayView({ overlay, curTP, curRP, tpFull, rpFull, nextReset, timers,
     return (
       <div style={{ ...styleTxt }}>
         <div style={{ ...slab }}>Daily Reset</div>
-        <div style={sub}>{new Date(nextReset).toLocaleString(undefined, { timeZone: TZ })}</div>
+        <div style={sub}>{new Date(nextReset).toLocaleString(undefined, { timeZone: zone })}</div>
         <div style={{ fontSize: 32, marginTop: 8 }}>{formatDHMS(nextReset - now())}</div>
       </div>
     );
@@ -1096,7 +1156,7 @@ function OverlayView({ overlay, curTP, curRP, tpFull, rpFull, nextReset, timers,
     return (
       <div style={{ ...styleTxt }}>
         <div style={{ ...slab }}>{a.label || "Timer"}</div>
-        <div style={sub}>{new Date(a.ts).toLocaleString(undefined, { timeZone: TZ })}</div>
+        <div style={sub}>{new Date(a.ts).toLocaleString(undefined, { timeZone: zone })}</div>
         <div style={{ fontSize: 32 }}>
           {formatDHMS(rem)} ({formatMMSS(rem)})
         </div>
@@ -1208,6 +1268,20 @@ export default function UmaResourceTracker() {
     timers: {},
     resets: {},
   });
+  const [timezone, setTimezone] = useLocalStorage<string>("uma.timezone", DEFAULT_TZ);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tzDraft, setTzDraft] = useState(timezone);
+  const [tzError, setTzError] = useState<string | null>(null);
+
+  const activeTimeZone = ensureTimeZone(timezone);
+
+  useEffect(() => {
+    if (!isValidTimeZone(timezone)) setTimezone(DEFAULT_TZ);
+  }, [timezone, setTimezone]);
+
+  useEffect(() => {
+    if (!settingsOpen) setTzDraft(timezone);
+  }, [timezone, settingsOpen]);
 
   useEffect(() => {
     const sTP = sanitizeResource(tpRaw, TP_CAP);
@@ -1317,7 +1391,11 @@ export default function UmaResourceTracker() {
     () => computeCurrent(rp.base, rp.last, RP_RATE_MS, RP_CAP, rp.nextOverride, now()),
     [rp, tick]
   );
-  const nextReset = useMemo(() => nextDailyResetTS(new Date()), [tick]);
+  const nextReset = useMemo(
+    () => nextDailyResetTS(new Date(), activeTimeZone),
+    [tick, activeTimeZone]
+  );
+  const tzOffset = useMemo(() => getTZOffsetDesignator(activeTimeZone), [activeTimeZone]);
 
   const [anchoredInit, setAnchoredInit] = useState(false);
   useEffect(() => {
@@ -1403,6 +1481,35 @@ export default function UmaResourceTracker() {
   );
   const rpFull = useMemo(() => timeToFull(curRP, RP_RATE_MS, RP_CAP), [curRP]);
   const tpFull = useMemo(() => timeToFull(curTP, TP_RATE_MS, TP_CAP), [curTP]);
+
+  function toggleSettings() {
+    setSettingsOpen((prev) => {
+      const next = !prev;
+      setTzDraft(timezone);
+      setTzError(null);
+      return next;
+    });
+  }
+
+  function saveTimeZone() {
+    const trimmed = tzDraft.trim();
+    if (!trimmed) {
+      setTzError("Time zone cannot be empty.");
+      return;
+    }
+    if (!isValidTimeZone(trimmed)) {
+      setTzError("Enter a valid IANA time zone (e.g., America/Chicago).");
+      return;
+    }
+    setTimezone(trimmed);
+    setTzError(null);
+  }
+
+  function closeSettings() {
+    setSettingsOpen(false);
+    setTzError(null);
+    setTzDraft(timezone);
+  }
 
   function adjustTP(delta: number) {
     const current = computeCurrent(tp.base, tp.last, TP_RATE_MS, TP_CAP, tp.nextOverride, now());
@@ -1562,6 +1669,13 @@ export default function UmaResourceTracker() {
     document.body.style.color = COLOR.text;
   }, []);
 
+  const tzDraftTrimmed = tzDraft.trim();
+  const tzDraftIsValid = tzDraftTrimmed.length > 0 && isValidTimeZone(tzDraftTrimmed);
+  const tzPreview = settingsOpen && tzDraftIsValid
+    ? new Date().toLocaleString(undefined, { timeZone: tzDraftTrimmed })
+    : null;
+  const resetTitle = `Daily Reset (10:00 AM ${activeTimeZone} • UTC${tzOffset})`;
+
   if (overlay) {
     return (
       <div style={{ padding: 16, fontFamily: "Inter, ui-sans-serif, system-ui", color: COLOR.text }}>
@@ -1574,6 +1688,7 @@ export default function UmaResourceTracker() {
           nextReset={nextReset}
           timers={timers}
           absTimers={absTimers}
+          timeZone={activeTimeZone}
         />
       </div>
     );
@@ -1581,10 +1696,55 @@ export default function UmaResourceTracker() {
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
-      <Header hud={hud} />
+      <Header
+        hud={hud}
+        onOpenSettings={toggleSettings}
+        timeZone={activeTimeZone}
+        isSettingsOpen={settingsOpen}
+      />
+
+      {settingsOpen && (
+        <Card title="Settings">
+          <div style={{ display: "grid", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>Time zone</div>
+              <div style={{ fontSize: 12, color: COLOR.subtle, marginTop: 4 }}>
+                Determines when the 10:00 AM daily reset occurs and how timers are displayed.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <Input
+                  value={tzDraft}
+                  onChange={(v) => {
+                    setTzDraft(v);
+                    setTzError(null);
+                  }}
+                  placeholder="America/Chicago"
+                />
+              </div>
+              <SmallBtn onClick={saveTimeZone}>Save time zone</SmallBtn>
+              <SmallBtn onClick={closeSettings}>Done</SmallBtn>
+            </div>
+            {tzError && (
+              <div style={{ fontSize: 12, color: COLOR.danger }}>{tzError}</div>
+            )}
+            {!tzError && tzDraftTrimmed.length > 0 && !tzDraftIsValid && (
+              <div style={{ fontSize: 12, color: COLOR.subtle }}>
+                Enter a valid IANA time zone such as America/Chicago or Asia/Tokyo.
+              </div>
+            )}
+            {tzPreview && (
+              <div style={{ fontSize: 12, color: COLOR.subtle }}>
+                Current local time in {tzDraftTrimmed}: {tzPreview}
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
 
       <Card title="Daily Reset & Custom Timers">
-        <CountdownRow targetMs={nextReset} />
+        <CountdownRow targetMs={nextReset} timeZone={activeTimeZone} />
         <div style={{ marginTop: 12 }}>
           <div style={{ fontSize: 13, color: COLOR.subtle, marginBottom: 6 }}>Custom timers</div>
           <TimerSummaryList timers={timerSummary} />
@@ -1693,6 +1853,7 @@ export default function UmaResourceTracker() {
           onSetNextOverride={(v) => setNextPointOverride("tp", v)}
           hud={hud}
           onCopyOverlay={() => copyOverlayURL("tp")}
+          timeZone={activeTimeZone}
         />
 
         <ResourceCard
@@ -1713,6 +1874,7 @@ export default function UmaResourceTracker() {
           onSetNextOverride={(v) => setNextPointOverride("rp", v)}
           hud={hud}
           onCopyOverlay={() => copyOverlayURL("rp")}
+          timeZone={activeTimeZone}
         />
       </div>
 
@@ -1752,7 +1914,7 @@ export default function UmaResourceTracker() {
                   <div>
                     <div style={{ fontWeight: 600 }}>{a.label || "Timer"}</div>
                     <div style={{ fontSize: 13, color: COLOR.subtle }}>
-                      At: {new Date(a.ts).toLocaleString(undefined, { timeZone: TZ })}
+                      At: {new Date(a.ts).toLocaleString(undefined, { timeZone: activeTimeZone })}
                     </div>
                     <div style={{ fontSize: 14 }}>
                       Time left: {formatDHMS(rem)} ({formatMMSS(rem)})
@@ -1796,7 +1958,7 @@ export default function UmaResourceTracker() {
 
     const off = (function () {
       try {
-        return getTZOffsetDesignator("America/Chicago");
+        return getTZOffsetDesignator(DEFAULT_TZ);
       } catch (e) {
         console.warn(e);
         return "";
@@ -1822,7 +1984,7 @@ export default function UmaResourceTracker() {
     const a2 = computeCurrent(45, nowMs, 10 * 60 * 1000, 100, anchor, nowMs);
     eq(Math.abs(a1.nextPoint - a2.nextPoint) < 5, true, "anchor keeps nextPoint stable across spends");
 
-    const ndr = nextDailyResetTS(new Date());
+    const ndr = nextDailyResetTS(new Date(), DEFAULT_TZ);
     eq(Number.isFinite(ndr) && ndr > Date.now(), true, "nextDailyResetTS returns a future finite timestamp");
   } catch (e) {
     console.warn("Test harness error: ", e);
