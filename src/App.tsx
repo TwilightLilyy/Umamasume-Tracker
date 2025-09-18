@@ -815,6 +815,20 @@ interface SelectProps {
 }
 
 function Select({ value, onChange, children }: SelectProps) {
+  const optionBackground = mixColor(COLOR.card, "#000000", 0.35);
+  const styledChildren = React.Children.map(children, (child) => {
+    if (React.isValidElement(child) && child.type === "option") {
+      return React.cloneElement(child, {
+        style: {
+          backgroundColor: optionBackground,
+          color: COLOR.text,
+          ...(child.props.style ?? {}),
+        },
+      });
+    }
+    return child;
+  });
+
   return (
     <select
       value={value}
@@ -826,13 +840,14 @@ function Select({ value, onChange, children }: SelectProps) {
           mixColor(COLOR.bg, "#000000", 0.4),
           0.95
         )} 100%)`,
+        backgroundColor: optionBackground,
         color: COLOR.text,
         border: `1px solid ${withAlpha(COLOR.border, 0.85)}`,
         boxShadow: `0 6px 18px ${withAlpha("#000000", 0.3)}`,
         minWidth: 160,
       }}
     >
-      {children}
+      {styledChildren}
     </select>
   );
 }
