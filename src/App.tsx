@@ -15,24 +15,24 @@ function ensureTimeZone(value: string) {
   return isValidTimeZone(value) ? value : DEFAULT_TZ;
 }
 const COLOR = {
-  bg: "#060d1f",
-  card: "#16213e",
-  border: "#25335d",
-  text: "#e6edff",
-  subtle: "#a7b9de",
-  tp: "#ffce52",
-  rp: "#5fb3ff",
-  good: "#4ade80",
-  danger: "#ff6b6b",
-  slate700: "#3b4a6b",
+  bg: "#050b1a",
+  card: "#0b162b",
+  border: "#1f2f4d",
+  text: "#f8fbff",
+  subtle: "#cdd9f5",
+  tp: "#38bdf8",
+  rp: "#818cf8",
+  good: "#22c55e",
+  danger: "#f87171",
+  slate700: "#2c3a57",
 };
 
 const TIMER_COLORS = [
   "#f97316",
-  "#3b82f6",
+  "#38bdf8",
   "#a855f7",
   "#22c55e",
-  "#f43f5e",
+  "#f87171",
   "#14b8a6",
   "#facc15",
   "#ec4899",
@@ -208,10 +208,10 @@ interface AbsTimerGroup {
 }
 
 const DEFAULT_ABS_TIMER_GROUPS: AbsTimerGroup[] = [
-  { id: "uma-banners", name: "Uma banners", color: "#fb923c" },
-  { id: "support-card-banners", name: "Support card banners", color: "#60a5fa" },
-  { id: "champions-meeting", name: "Champions Meeting", color: "#c084fc" },
-  { id: "other", name: "Other", color: "#9ca3af" },
+  { id: "uma-banners", name: "Uma banners", color: "#f97316" },
+  { id: "support-card-banners", name: "Support card banners", color: "#38bdf8" },
+  { id: "champions-meeting", name: "Champions Meeting", color: "#a855f7" },
+  { id: "other", name: "Other", color: "#22c55e" },
 ];
 
 function defaultTimerColor(index: number) {
@@ -643,15 +643,16 @@ function Card({ title, children }: CardProps) {
   return (
     <div
       style={{
-        background: `linear-gradient(150deg, ${withAlpha(COLOR.card, 0.95)} 0%, ${withAlpha(
-          mixColor(COLOR.card, "#000000", 0.25),
-          0.95
+        background: `linear-gradient(150deg, ${withAlpha(mixColor(COLOR.card, COLOR.bg, 0.35), 0.97)} 0%, ${withAlpha(
+          mixColor(COLOR.card, "#000000", 0.5),
+          0.97
         )} 100%)`,
-        border: `1px solid ${withAlpha(COLOR.border, 0.8)}`,
+        border: `1px solid ${withAlpha(mixColor(COLOR.border, "#000000", 0.35), 0.85)}`,
         borderRadius: 16,
         padding: 16,
-        boxShadow: `0 18px 40px ${withAlpha("#000000", 0.35)}`,
+        boxShadow: `0 18px 40px ${withAlpha(mixColor(COLOR.card, "#000000", 0.55), 0.5)}`,
         marginBottom: 16,
+        color: COLOR.text,
       }}
     >
       <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>{title}</div>
@@ -1388,7 +1389,7 @@ function AbsTimerItem({
       ? `Time left: ${formatDHMS(remaining)} (${formatMMSS(remaining)})`
       : `Ended ${formatDHMS(-remaining)} ago`;
   let statusText = "Active";
-  let statusColor = withAlpha(accent, 0.85);
+  let statusColor = mixColor(accent, "#ffffff", 0.2);
   if (timer.status === "completed") {
     statusText = "Completed";
     statusColor = COLOR.good;
@@ -1775,19 +1776,25 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
               ? "Ready"
               : `${formatDHMS(t.remainingMs)} (${formatMMSS(t.remainingMs)})`;
             const accent = t.colorResolved;
-            const gradient = `linear-gradient(140deg, ${withAlpha(mixColor(accent, "#ffffff", 0.35), 0.9)} 0%, ${withAlpha(
-              mixColor(accent, "#000000", 0.4),
-              0.95
+            const gradient = `linear-gradient(140deg, ${withAlpha(mixColor(accent, COLOR.bg, 0.4), 0.97)} 0%, ${withAlpha(
+              mixColor(accent, "#000000", 0.55),
+              0.97
             )} 100%)`;
+            const borderColor = withAlpha(mixColor(accent, "#000000", 0.55), 0.88);
+            const statusColor = mixColor(accent, "#ffffff", 0.2);
+            const progressColor = mixColor(accent, "#ffffff", 0.15);
+            const progressTrack = withAlpha(mixColor(accent, COLOR.bg, 0.65), 0.45);
+            const shadow = withAlpha(mixColor(accent, "#000000", 0.45), 0.45);
             return (
               <div
                 key={t.id}
                 style={{
                   background: gradient,
-                  border: `1px solid ${withAlpha(mixColor(accent, "#000000", 0.25), 0.85)}`,
+                  border: `1px solid ${borderColor}`,
                   borderRadius: 12,
                   padding: 12,
-                  boxShadow: `0 10px 24px ${withAlpha(accent, 0.28)}`,
+                  boxShadow: `0 12px 24px ${shadow}`,
+                  color: COLOR.text,
                 }}
               >
                 <div
@@ -1805,19 +1812,19 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
                         height: 10,
                         borderRadius: "50%",
                         background: t.colorResolved,
-                        border: `1px solid ${COLOR.border}`,
+                        border: `1px solid ${withAlpha(COLOR.border, 0.85)}`,
                         boxShadow: "0 0 4px rgba(0,0,0,0.45)",
                       }}
                     />
-                    <span style={{ wordBreak: "break-word", color: t.colorResolved }}>{label}</span>
+                    <span style={{ wordBreak: "break-word" }}>{label}</span>
                   </span>
-                  <span style={{ color: withAlpha(accent, 0.75), fontSize: 12 }}>{status}</span>
+                  <span style={{ color: statusColor, fontSize: 12 }}>{status}</span>
                 </div>
                 <div
                   style={{
                     marginTop: 6,
                     height: 4,
-                    background: withAlpha(mixColor(accent, COLOR.bg, 0.6), 0.35),
+                    background: progressTrack,
                     borderRadius: 999,
                     overflow: "hidden",
                     boxShadow: `inset 0 0 4px ${withAlpha("#000000", 0.35)}`,
@@ -1826,7 +1833,7 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
                   <div
                     style={{
                       width: `${t.progress * 100}%`,
-                      background: t.colorResolved,
+                      background: progressColor,
                       height: "100%",
                       transition: "width 0.3s ease",
                     }}
@@ -1861,7 +1868,8 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
                 ? COLOR.good
                 : a.status === "expired" || rem <= 0
                 ? COLOR.danger
-                : withAlpha(accent, 0.85);
+                : mixColor(accent, "#ffffff", 0.2);
+            const timelineColor = mixColor(accent, "#ffffff", 0.2);
             return (
               <div key={a.id} style={cardRowStyle(accent)}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -1870,7 +1878,7 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
                   <div style={{ fontSize: 13, color: COLOR.subtle }}>
                     <span>At: {new Date(a.ts).toLocaleString(undefined, { timeZone: zone })}</span>
                   </div>
-                  <div style={{ marginTop: 6, fontSize: 12, color: withAlpha(accent, 0.75) }}>{timeLine}</div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: timelineColor }}>{timeLine}</div>
                   <div style={{ fontSize: 12, color: statusColor }}>Status: {statusText}</div>
                 </div>
               </div>
@@ -1884,21 +1892,24 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
 
 function cardRowStyle(accent?: string): React.CSSProperties {
   const base = accent ?? COLOR.slate700;
-  const gradStart = withAlpha(mixColor(base, "#ffffff", accent ? 0.3 : 0.2), 0.95);
-  const gradEnd = withAlpha(mixColor(base, "#000000", accent ? 0.35 : 0.45), 0.95);
-  const borderColor = withAlpha(mixColor(base, "#000000", 0.25), 0.85);
+  const gradStart = withAlpha(mixColor(base, COLOR.bg, 0.4), 0.97);
+  const gradEnd = withAlpha(mixColor(base, "#000000", 0.55), 0.97);
+  const borderColor = withAlpha(mixColor(base, "#000000", 0.55), 0.9);
+  const leftBorder = accent ? mixColor(base, "#ffffff", 0.15) : undefined;
+  const shadow = withAlpha(mixColor(base, "#000000", 0.5), 0.45);
   return {
     background: `linear-gradient(140deg, ${gradStart} 0%, ${gradEnd} 100%)`,
     border: `1px solid ${borderColor}`,
     borderRadius: 16,
+    color: COLOR.text,
     padding: 12,
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
-    borderLeft: accent ? `4px solid ${mixColor(accent, "#ffffff", 0.25)}` : undefined,
+    borderLeft: accent ? `4px solid ${leftBorder}` : undefined,
     paddingLeft: accent ? 16 : 12,
-    boxShadow: `0 12px 28px ${withAlpha(base, 0.28)}`,
+    boxShadow: `0 12px 28px ${shadow}`,
   };
 }
 
@@ -2866,7 +2877,7 @@ export default function UmaResourceTracker() {
   }
 
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
+    <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16, color: COLOR.text }}>
       <Header
         hud={hud}
         onOpenSettings={toggleSettings}
