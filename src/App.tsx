@@ -1798,6 +1798,50 @@ export default function UmaResourceTracker() {
         </Card>
       )}
 
+      <div style={{ display: "grid", gridTemplateColumns: hud ? "1fr 1fr" : "1fr 1fr", gap: 16 }}>
+        <ResourceCard
+          accent={COLOR.tp}
+          name="TP"
+          cap={TP_CAP}
+          rateMs={TP_RATE_MS}
+          state={tp}
+          setState={setTP}
+          current={curTP}
+          onMinus={() => adjustTP(-1)}
+          onPlus={() => adjustTP(1)}
+          onSpend30={() => spendTP(30)}
+          onUseOne={() => spendTP(1)}
+          milestones={[30, 60, 90]}
+          milestoneTimes={tpMilestoneTimes}
+          fullInfo={tpFull}
+          onSetNextOverride={(v) => setNextPointOverride("tp", v)}
+          hud={hud}
+          onCopyOverlay={() => copyOverlayURL("tp")}
+          timeZone={activeTimeZone}
+        />
+
+        <ResourceCard
+          accent={COLOR.rp}
+          name="RP"
+          cap={RP_CAP}
+          rateMs={RP_RATE_MS}
+          state={rp}
+          setState={setRP}
+          current={curRP}
+          onMinus={() => adjustRP(-1)}
+          onPlus={() => adjustRP(1)}
+          onSpend30={null}
+          onUseOne={() => useOneRP()}
+          milestones={[]}
+          milestoneTimes={{}}
+          fullInfo={rpFull}
+          onSetNextOverride={(v) => setNextPointOverride("rp", v)}
+          hud={hud}
+          onCopyOverlay={() => copyOverlayURL("rp")}
+          timeZone={activeTimeZone}
+        />
+      </div>
+
       <Card title="Daily Reset & Timer Overview">
         <CountdownRow targetMs={nextReset} timeZone={activeTimeZone} />
         <div style={{ marginTop: 12 }}>
@@ -1891,50 +1935,6 @@ export default function UmaResourceTracker() {
           Note: Notifications require this tab to stay open.
         </p>
       </Card>
-
-      <div style={{ display: "grid", gridTemplateColumns: hud ? "1fr 1fr" : "1fr 1fr", gap: 16 }}>
-        <ResourceCard
-          accent={COLOR.tp}
-          name="TP"
-          cap={TP_CAP}
-          rateMs={TP_RATE_MS}
-          state={tp}
-          setState={setTP}
-          current={curTP}
-          onMinus={() => adjustTP(-1)}
-          onPlus={() => adjustTP(1)}
-          onSpend30={() => spendTP(30)}
-          onUseOne={() => spendTP(1)}
-          milestones={[30, 60, 90]}
-          milestoneTimes={tpMilestoneTimes}
-          fullInfo={tpFull}
-          onSetNextOverride={(v) => setNextPointOverride("tp", v)}
-          hud={hud}
-          onCopyOverlay={() => copyOverlayURL("tp")}
-          timeZone={activeTimeZone}
-        />
-
-        <ResourceCard
-          accent={COLOR.rp}
-          name="RP"
-          cap={RP_CAP}
-          rateMs={RP_RATE_MS}
-          state={rp}
-          setState={setRP}
-          current={curRP}
-          onMinus={() => adjustRP(-1)}
-          onPlus={() => adjustRP(1)}
-          onSpend30={null}
-          onUseOne={() => useOneRP()}
-          milestones={[]}
-          milestoneTimes={{}}
-          fullInfo={rpFull}
-          onSetNextOverride={(v) => setNextPointOverride("rp", v)}
-          hud={hud}
-          onCopyOverlay={() => copyOverlayURL("rp")}
-          timeZone={activeTimeZone}
-        />
-      </div>
 
       <Card title="Custom Flexible Timers">
         <AddTimerForm onAdd={addTimer} defaultColor={nextTimerColor} />
