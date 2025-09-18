@@ -20,8 +20,10 @@ const COLOR = {
   border: "#1f2f4d",
   text: "#f8fbff",
   subtle: "#cdd9f5",
-  tp: "#38bdf8",
-  rp: "#818cf8",
+  // Keep TP gold to match the in-game resource card styling.
+  tp: "#facc15",
+  // Keep RP blue to match the in-game resource card styling.
+  rp: "#38bdf8",
   good: "#22c55e",
   danger: "#f87171",
   slate700: "#2c3a57",
