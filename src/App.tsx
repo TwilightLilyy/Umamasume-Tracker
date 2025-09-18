@@ -15,16 +15,16 @@ function ensureTimeZone(value: string) {
   return isValidTimeZone(value) ? value : DEFAULT_TZ;
 }
 const COLOR = {
-  bg: "#0b1220",
-  card: "#121a2a",
-  border: "#1d2a44",
-  text: "#d8e0f0",
-  subtle: "#a8b3c7",
-  tp: "#f0b428",
-  rp: "#4ea1ff",
-  good: "#36d399",
-  danger: "#ef4444",
-  slate700: "#334155",
+  bg: "#060d1f",
+  card: "#16213e",
+  border: "#25335d",
+  text: "#e6edff",
+  subtle: "#a7b9de",
+  tp: "#ffce52",
+  rp: "#5fb3ff",
+  good: "#4ade80",
+  danger: "#ff6b6b",
+  slate700: "#3b4a6b",
 };
 
 const TIMER_COLORS = [
@@ -51,6 +51,42 @@ function sanitizeTimerColor(color: string | undefined, index: number) {
 }
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+
+function hexToRgb(hex: string) {
+  const normalized = hex.trim().replace(/^#/, "");
+  if (normalized.length !== 3 && normalized.length !== 6) return null;
+  const expand = normalized.length === 3 ? normalized.split("").map((c) => c + c).join("") : normalized;
+  const num = Number.parseInt(expand, 16);
+  if (Number.isNaN(num)) return null;
+  return {
+    r: (num >> 16) & 0xff,
+    g: (num >> 8) & 0xff,
+    b: num & 0xff,
+  };
+}
+
+function rgbToHex(r: number, g: number, b: number) {
+  const toHex = (value: number) => clamp(Math.round(value), 0, 255).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function mixColor(color: string, target: string, amount: number) {
+  const base = hexToRgb(color);
+  const other = hexToRgb(target);
+  if (!base || !other) return color;
+  const ratio = clamp(amount, 0, 1);
+  const r = base.r + (other.r - base.r) * ratio;
+  const g = base.g + (other.g - base.g) * ratio;
+  const b = base.b + (other.b - base.b) * ratio;
+  return rgbToHex(r, g, b);
+}
+
+function withAlpha(hex: string, alpha: number) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return hex;
+  const a = clamp(alpha, 0, 1);
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${a})`;
+}
 const now = () => Date.now();
 
 export function formatDHMS(ms: number) {
@@ -411,11 +447,14 @@ function Card({ title, children }: CardProps) {
   return (
     <div
       style={{
-        background: COLOR.card,
-        border: `1px solid ${COLOR.border}`,
+        background: `linear-gradient(150deg, ${withAlpha(COLOR.card, 0.95)} 0%, ${withAlpha(
+          mixColor(COLOR.card, "#000000", 0.25),
+          0.95
+        )} 100%)`,
+        border: `1px solid ${withAlpha(COLOR.border, 0.8)}`,
         borderRadius: 16,
         padding: 16,
-        boxShadow: "0 6px 24px rgba(0,0,0,.25)",
+        boxShadow: `0 18px 40px ${withAlpha("#000000", 0.35)}`,
         marginBottom: 16,
       }}
     >
@@ -474,17 +513,30 @@ interface ProgressBarProps {
 
 function ProgressBar({ value, max, color }: ProgressBarProps) {
   const pct = Math.round((value / max) * 100);
+  const track = withAlpha(mixColor(color, COLOR.bg, 0.7), 0.4);
+  const fill = `linear-gradient(90deg, ${withAlpha(mixColor(color, "#ffffff", 0.35), 0.9)} 0%, ${withAlpha(
+    mixColor(color, "#000000", 0.1),
+    0.95
+  )} 100%)`;
   return (
     <div
       style={{
         width: "100%",
         height: 10,
-        background: COLOR.border,
+        background: track,
         borderRadius: 999,
         overflow: "hidden",
+        boxShadow: `inset 0 0 8px ${withAlpha("#000000", 0.35)}`,
       }}
     >
-      <div style={{ width: `${pct}%`, height: "100%", background: color }} />
+      <div
+        style={{
+          width: `${pct}%`,
+          height: "100%",
+          background: fill,
+          transition: "width 0.3s ease",
+        }}
+      />
     </div>
   );
 }
@@ -496,16 +548,23 @@ interface SmallBtnProps {
 }
 
 function SmallBtn({ onClick, children, danger }: SmallBtnProps) {
+  const base = danger ? COLOR.danger : COLOR.slate700;
+  const highlight = mixColor(base, "#ffffff", danger ? 0.35 : 0.25);
+  const shadow = mixColor(base, "#000000", 0.3);
   return (
     <button
+      type="button"
       onClick={onClick}
       style={{
         padding: "6px 10px",
         fontSize: 12,
         borderRadius: 10,
-        background: danger ? COLOR.danger : COLOR.slate700,
+        background: `linear-gradient(135deg, ${withAlpha(highlight, 0.95)} 0%, ${withAlpha(shadow, 0.95)} 100%)`,
         color: COLOR.text,
-        border: `1px solid ${COLOR.border}`,
+        border: `1px solid ${withAlpha(mixColor(base, "#000000", 0.2), 0.9)}`,
+        boxShadow: `0 8px 18px ${withAlpha(base, 0.28)}`,
+        cursor: "pointer",
+        transition: "transform 0.15s ease, box-shadow 0.15s ease",
       }}
     >
       {children}
@@ -530,10 +589,14 @@ function Input({ value, onChange, placeholder, type = "text" }: InputProps) {
       style={{
         padding: "8px 12px",
         borderRadius: 12,
-        background: COLOR.bg,
+        background: `linear-gradient(135deg, ${withAlpha(mixColor(COLOR.bg, "#ffffff", 0.08), 0.9)} 0%, ${withAlpha(
+          mixColor(COLOR.bg, "#000000", 0.4),
+          0.95
+        )} 100%)`,
         color: COLOR.text,
-        border: `1px solid ${COLOR.border}`,
+        border: `1px solid ${withAlpha(COLOR.border, 0.85)}`,
         width: "100%",
+        boxShadow: `0 6px 18px ${withAlpha("#000000", 0.3)}`,
       }}
     />
   );
@@ -910,6 +973,11 @@ function TimerRow({ t, meta, onAddMinutes, onPause, onReset, onDelete, onCopy, o
     ? "Ready"
     : `${formatDHMS(remaining)} (${formatMMSS(remaining)})`;
   const colorValue = t.color ?? meta.colorResolved;
+  const track = withAlpha(mixColor(meta.colorResolved, COLOR.bg, 0.6), 0.35);
+  const fill = `linear-gradient(135deg, ${withAlpha(mixColor(meta.colorResolved, "#ffffff", 0.35), 0.95)} 0%, ${withAlpha(
+    mixColor(meta.colorResolved, "#000000", 0.2),
+    0.95
+  )} 100%)`;
   return (
     <div style={cardRowStyle(meta.colorResolved)}>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -920,8 +988,8 @@ function TimerRow({ t, meta, onAddMinutes, onPause, onReset, onDelete, onCopy, o
               height: 20,
               borderRadius: "50%",
               background: colorValue,
-              border: `1px solid ${COLOR.border}`,
-              boxShadow: "0 0 6px rgba(0,0,0,0.45)",
+              border: `1px solid ${withAlpha(mixColor(meta.colorResolved, "#000000", 0.25), 0.9)}`,
+              boxShadow: `0 0 10px ${withAlpha(meta.colorResolved, 0.65)}`,
               cursor: "pointer",
               position: "relative",
               flexShrink: 0,
@@ -942,23 +1010,24 @@ function TimerRow({ t, meta, onAddMinutes, onPause, onReset, onDelete, onCopy, o
           </label>
           <div>
             <div style={{ fontWeight: 600, wordBreak: "break-word" }}>{t.label || "Timer"}</div>
-            <div style={{ fontSize: 13, color: COLOR.subtle }}>Remaining</div>
-            <div style={{ fontSize: 14 }}>{statusLabel}</div>
+            <div style={{ fontSize: 13, color: withAlpha(meta.colorResolved, 0.7) }}>Remaining</div>
+            <div style={{ fontSize: 14, color: COLOR.text }}>{statusLabel}</div>
           </div>
         </div>
         <div
           style={{
             marginTop: 10,
             height: 6,
-            background: COLOR.border,
+            background: track,
             borderRadius: 999,
             overflow: "hidden",
+            boxShadow: `inset 0 0 6px ${withAlpha("#000000", 0.3)}`,
           }}
         >
           <div
             style={{
               width: `${meta.progress * 100}%`,
-              background: meta.colorResolved,
+              background: fill,
               height: "100%",
               transition: "width 0.3s ease",
             }}
@@ -1013,14 +1082,20 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
               : t.remainingMs <= 0
               ? "Ready"
               : `${formatDHMS(t.remainingMs)} (${formatMMSS(t.remainingMs)})`;
+            const accent = t.colorResolved;
+            const gradient = `linear-gradient(140deg, ${withAlpha(mixColor(accent, "#ffffff", 0.35), 0.9)} 0%, ${withAlpha(
+              mixColor(accent, "#000000", 0.4),
+              0.95
+            )} 100%)`;
             return (
               <div
                 key={t.id}
                 style={{
-                  background: COLOR.bg,
-                  border: `1px solid ${COLOR.border}`,
+                  background: gradient,
+                  border: `1px solid ${withAlpha(mixColor(accent, "#000000", 0.25), 0.85)}`,
                   borderRadius: 12,
-                  padding: 10,
+                  padding: 12,
+                  boxShadow: `0 10px 24px ${withAlpha(accent, 0.28)}`,
                 }}
               >
                 <div
@@ -1038,27 +1113,31 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
                         height: 10,
                         borderRadius: "50%",
                         background: t.colorResolved,
-                        border: `1px solid ${COLOR.border}`,
-                        boxShadow: "0 0 4px rgba(0,0,0,0.45)",
+                        border: `1px solid ${withAlpha(mixColor(accent, "#000000", 0.3), 0.85)}`,
+                        boxShadow: `0 0 8px ${withAlpha(accent, 0.6)}`,
                       }}
                     />
                     <span style={{ wordBreak: "break-word" }}>{label}</span>
                   </span>
-                  <span style={{ color: COLOR.subtle, fontSize: 12 }}>{status}</span>
+                  <span style={{ color: withAlpha(accent, 0.75), fontSize: 12 }}>{status}</span>
                 </div>
                 <div
                   style={{
                     marginTop: 6,
                     height: 4,
-                    background: COLOR.border,
+                    background: withAlpha(mixColor(accent, COLOR.bg, 0.6), 0.35),
                     borderRadius: 999,
                     overflow: "hidden",
+                    boxShadow: `inset 0 0 4px ${withAlpha("#000000", 0.35)}`,
                   }}
                 >
                   <div
                     style={{
                       width: `${t.progress * 100}%`,
-                      background: t.colorResolved,
+                      background: `linear-gradient(135deg, ${withAlpha(mixColor(accent, "#ffffff", 0.3), 0.9)} 0%, ${withAlpha(
+                        mixColor(accent, "#000000", 0.2),
+                        0.95
+                      )} 100%)`,
                       height: "100%",
                       transition: "width 0.3s ease",
                     }}
@@ -1073,16 +1152,23 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
       {sortedAbs.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ fontSize: 13, color: COLOR.subtle }}>Exact date/time timers</div>
-          {sortedAbs.map((a) => {
+          {sortedAbs.map((a, index) => {
             const rem = Math.max(0, a.ts - nowMs);
+            const palette = [COLOR.rp, COLOR.tp, COLOR.good];
+            const accent = palette[index % palette.length];
+            const gradient = `linear-gradient(140deg, ${withAlpha(mixColor(accent, "#ffffff", 0.3), 0.9)} 0%, ${withAlpha(
+              mixColor(accent, "#000000", 0.35),
+              0.95
+            )} 100%)`;
             return (
               <div
                 key={a.id}
                 style={{
-                  background: COLOR.bg,
-                  border: `1px solid ${COLOR.border}`,
+                  background: gradient,
+                  border: `1px solid ${withAlpha(mixColor(accent, "#000000", 0.25), 0.85)}`,
                   borderRadius: 12,
-                  padding: 10,
+                  padding: 12,
+                  boxShadow: `0 12px 26px ${withAlpha(accent, 0.25)}`,
                 }}
               >
                 <div
@@ -1096,11 +1182,11 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
                   <span style={{ fontWeight: 600, wordBreak: "break-word" }}>
                     {a.label || "Timer"}
                   </span>
-                  <span style={{ color: COLOR.subtle, fontSize: 12 }}>
+                  <span style={{ color: withAlpha(accent, 0.8), fontSize: 12 }}>
                     {new Date(a.ts).toLocaleString(undefined, { timeZone: zone })}
                   </span>
                 </div>
-                <div style={{ marginTop: 6, fontSize: 12, color: COLOR.subtle }}>
+                <div style={{ marginTop: 6, fontSize: 12, color: withAlpha(accent, 0.75) }}>
                   Time left: {formatDHMS(rem)} ({formatMMSS(rem)})
                 </div>
               </div>
@@ -1113,17 +1199,22 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
 }
 
 function cardRowStyle(accent?: string): React.CSSProperties {
+  const base = accent ?? COLOR.slate700;
+  const gradStart = withAlpha(mixColor(base, "#ffffff", accent ? 0.3 : 0.2), 0.95);
+  const gradEnd = withAlpha(mixColor(base, "#000000", accent ? 0.35 : 0.45), 0.95);
+  const borderColor = withAlpha(mixColor(base, "#000000", 0.25), 0.85);
   return {
-    background: COLOR.card,
-    border: `1px solid ${COLOR.border}`,
-    borderRadius: 14,
+    background: `linear-gradient(140deg, ${gradStart} 0%, ${gradEnd} 100%)`,
+    border: `1px solid ${borderColor}`,
+    borderRadius: 16,
     padding: 12,
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
-    borderLeft: accent ? `4px solid ${accent}` : undefined,
+    borderLeft: accent ? `4px solid ${mixColor(accent, "#ffffff", 0.25)}` : undefined,
     paddingLeft: accent ? 16 : 12,
+    boxShadow: `0 12px 28px ${withAlpha(base, 0.28)}`,
   };
 }
 
@@ -1720,7 +1811,12 @@ export default function UmaResourceTracker() {
   }
 
   useEffect(() => {
-    document.body.style.background = COLOR.bg;
+    const bgGradient = `radial-gradient(circle at 20% 20%, ${mixColor(COLOR.bg, "#1f3b73", 0.35)} 0%, ${COLOR.bg} 55%, ${mixColor(
+      COLOR.bg,
+      "#000000",
+      0.45
+    )} 100%)`;
+    document.body.style.background = bgGradient;
     document.body.style.color = COLOR.text;
   }, []);
 
