@@ -983,76 +983,131 @@ function TimerRow({ t, meta, onAddMinutes, onPause, onReset, onDelete, onCopy, o
   );
 }
 
-function TimerSummaryList({ timers }: { timers: TimerDisplayData[] }) {
-  if (!timers.length)
+interface TimerOverviewListProps {
+  timers: TimerDisplayData[];
+  absTimers: AbsTimer[];
+  timeZone: string;
+}
+
+function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListProps) {
+  if (!timers.length && !absTimers.length)
     return (
       <p style={{ color: COLOR.subtle, fontSize: 13, marginTop: 6, marginBottom: 0 }}>
-        No custom timers yet.
+        No timers yet.
       </p>
     );
+
+  const zone = ensureTimeZone(timeZone);
+  const nowMs = now();
+  const sortedAbs = [...absTimers].sort((a, b) => a.ts - b.ts);
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {timers.map((t) => {
-        const label = t.label || "Timer";
-        const status = t.isPaused
-          ? `Paused (${formatDHMS(t.remainingMs)})`
-          : t.remainingMs <= 0
-          ? "Ready"
-          : `${formatDHMS(t.remainingMs)} (${formatMMSS(t.remainingMs)})`;
-        return (
-          <div
-            key={t.id}
-            style={{
-              background: COLOR.bg,
-              border: `1px solid ${COLOR.border}`,
-              borderRadius: 12,
-              padding: 10,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
-                <span
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: "50%",
-                    background: t.colorResolved,
-                    border: `1px solid ${COLOR.border}`,
-                    boxShadow: "0 0 4px rgba(0,0,0,0.45)",
-                  }}
-                />
-                <span style={{ wordBreak: "break-word" }}>{label}</span>
-              </span>
-              <span style={{ color: COLOR.subtle, fontSize: 12 }}>{status}</span>
-            </div>
-            <div
-              style={{
-                marginTop: 6,
-                height: 4,
-                background: COLOR.border,
-                borderRadius: 999,
-                overflow: "hidden",
-              }}
-            >
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {timers.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 13, color: COLOR.subtle }}>Custom flexible timers</div>
+          {timers.map((t) => {
+            const label = t.label || "Timer";
+            const status = t.isPaused
+              ? `Paused (${formatDHMS(t.remainingMs)})`
+              : t.remainingMs <= 0
+              ? "Ready"
+              : `${formatDHMS(t.remainingMs)} (${formatMMSS(t.remainingMs)})`;
+            return (
               <div
+                key={t.id}
                 style={{
-                  width: `${t.progress * 100}%`,
-                  background: t.colorResolved,
-                  height: "100%",
-                  transition: "width 0.3s ease",
+                  background: COLOR.bg,
+                  border: `1px solid ${COLOR.border}`,
+                  borderRadius: 12,
+                  padding: 10,
                 }}
-              />
-            </div>
-          </div>
-        );
-      })}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
+                    <span
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: "50%",
+                        background: t.colorResolved,
+                        border: `1px solid ${COLOR.border}`,
+                        boxShadow: "0 0 4px rgba(0,0,0,0.45)",
+                      }}
+                    />
+                    <span style={{ wordBreak: "break-word" }}>{label}</span>
+                  </span>
+                  <span style={{ color: COLOR.subtle, fontSize: 12 }}>{status}</span>
+                </div>
+                <div
+                  style={{
+                    marginTop: 6,
+                    height: 4,
+                    background: COLOR.border,
+                    borderRadius: 999,
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${t.progress * 100}%`,
+                      background: t.colorResolved,
+                      height: "100%",
+                      transition: "width 0.3s ease",
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {sortedAbs.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 13, color: COLOR.subtle }}>Exact date/time timers</div>
+          {sortedAbs.map((a) => {
+            const rem = Math.max(0, a.ts - nowMs);
+            return (
+              <div
+                key={a.id}
+                style={{
+                  background: COLOR.bg,
+                  border: `1px solid ${COLOR.border}`,
+                  borderRadius: 12,
+                  padding: 10,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <span style={{ fontWeight: 600, wordBreak: "break-word" }}>
+                    {a.label || "Timer"}
+                  </span>
+                  <span style={{ color: COLOR.subtle, fontSize: 12 }}>
+                    {new Date(a.ts).toLocaleString(undefined, { timeZone: zone })}
+                  </span>
+                </div>
+                <div style={{ marginTop: 6, fontSize: 12, color: COLOR.subtle }}>
+                  Time left: {formatDHMS(rem)} ({formatMMSS(rem)})
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1743,11 +1798,14 @@ export default function UmaResourceTracker() {
         </Card>
       )}
 
-      <Card title="Daily Reset & Custom Timers">
+      <Card title="Daily Reset & Timer Overview">
         <CountdownRow targetMs={nextReset} timeZone={activeTimeZone} />
         <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 13, color: COLOR.subtle, marginBottom: 6 }}>Custom timers</div>
-          <TimerSummaryList timers={timerSummary} />
+          <TimerOverviewList
+            timers={timerSummary}
+            absTimers={absTimers}
+            timeZone={activeTimeZone}
+          />
         </div>
         <RowRight>
           <SmallBtn onClick={() => copyOverlayURL("reset")}>Copy Overlay URL</SmallBtn>
