@@ -14,6 +14,29 @@ const COLOR = {
   slate700: "#334155",
 };
 
+const TIMER_COLORS = [
+  "#f97316",
+  "#3b82f6",
+  "#a855f7",
+  "#22c55e",
+  "#f43f5e",
+  "#14b8a6",
+  "#facc15",
+  "#ec4899",
+];
+
+function defaultTimerColor(index: number) {
+  if (index < 0) return TIMER_COLORS[0];
+  return TIMER_COLORS[index % TIMER_COLORS.length];
+}
+
+function sanitizeTimerColor(color: string | undefined, index: number) {
+  if (!color) return defaultTimerColor(index);
+  const hex = color.trim();
+  const valid = /^#([0-9a-f]{6}|[0-9a-f]{3})$/i.test(hex);
+  return valid ? hex : defaultTimerColor(index);
+}
+
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 const now = () => Date.now();
 
@@ -664,22 +687,67 @@ function ResourceCard({
 }
 
 interface AddTimerFormProps {
-  onAdd: (label: string, duration: string) => void;
+  onAdd: (label: string, duration: string, color: string) => void;
+  defaultColor: string;
 }
 
-function AddTimerForm({ onAdd }: AddTimerFormProps) {
+function AddTimerForm({ onAdd, defaultColor }: AddTimerFormProps) {
   const [label, setLabel] = useState("");
   const [dur, setDur] = useState("");
+  const [color, setColor] = useState(defaultColor);
   const place = "mm:ss, 10m, 2h, or seconds";
+
+  useEffect(() => {
+    setColor(defaultColor);
+  }, [defaultColor]);
+
   return (
-    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
       <Input placeholder="Label (optional)" value={label} onChange={setLabel} />
       <Input placeholder={place} value={dur} onChange={setDur} />
+      <label
+        style={{
+          width: 48,
+          height: 40,
+          borderRadius: 12,
+          border: `1px solid ${COLOR.border}`,
+          background: COLOR.bg,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          position: "relative",
+        }}
+        title="Pick timer color"
+      >
+        <span
+          style={{
+            width: 20,
+            height: 20,
+            borderRadius: "50%",
+            background: color,
+            border: `1px solid ${COLOR.border}`,
+            boxShadow: "0 0 6px rgba(0,0,0,0.45)",
+          }}
+        />
+        <input
+          type="color"
+          value={color}
+          onChange={(e) => setColor(e.target.value)}
+          style={{
+            position: "absolute",
+            inset: 0,
+            opacity: 0,
+            cursor: "pointer",
+          }}
+        />
+      </label>
       <SmallBtn
         onClick={() => {
-          onAdd(label, dur);
+          onAdd(label, dur, color);
           setLabel("");
           setDur("");
+          setColor(defaultColor);
         }}
       >
         Add
@@ -689,21 +757,66 @@ function AddTimerForm({ onAdd }: AddTimerFormProps) {
 }
 
 interface AddAbsTimerFormProps {
-  onAdd: (label: string, dateTime: string) => void;
+  onAdd: (label: string, dateTime: string, color: string) => void;
+  defaultColor: string;
 }
 
-function AddAbsTimerForm({ onAdd }: AddAbsTimerFormProps) {
+function AddAbsTimerForm({ onAdd, defaultColor }: AddAbsTimerFormProps) {
   const [label, setLabel] = useState("");
   const [dt, setDt] = useState("");
+  const [color, setColor] = useState(defaultColor);
+
+  useEffect(() => {
+    setColor(defaultColor);
+  }, [defaultColor]);
+
   return (
-    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
       <Input placeholder="Label (e.g., Banner Release)" value={label} onChange={setLabel} />
       <Input type="datetime-local" value={dt} onChange={setDt} />
+      <label
+        style={{
+          width: 48,
+          height: 40,
+          borderRadius: 12,
+          border: `1px solid ${COLOR.border}`,
+          background: COLOR.bg,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          position: "relative",
+        }}
+        title="Pick timer color"
+      >
+        <span
+          style={{
+            width: 20,
+            height: 20,
+            borderRadius: "50%",
+            background: color,
+            border: `1px solid ${COLOR.border}`,
+            boxShadow: "0 0 6px rgba(0,0,0,0.45)",
+          }}
+        />
+        <input
+          type="color"
+          value={color}
+          onChange={(e) => setColor(e.target.value)}
+          style={{
+            position: "absolute",
+            inset: 0,
+            opacity: 0,
+            cursor: "pointer",
+          }}
+        />
+      </label>
       <SmallBtn
         onClick={() => {
-          onAdd(label, dt);
+          onAdd(label, dt, color);
           setLabel("");
           setDt("");
+          setColor(defaultColor);
         }}
       >
         Add
@@ -719,31 +832,124 @@ interface TimerData {
   isPaused?: boolean;
   pausedRemaining?: number | null;
   created?: number;
+  color?: string;
+  durationMs?: number;
   remainingMs?: number;
+}
+
+interface TimerDisplayData extends TimerData {
+  remainingMs: number;
+  totalMs: number;
+  progress: number;
+  colorResolved: string;
+}
+
+function computeTimerRemainingMs(t: TimerData, nowMs: number) {
+  if (t.isPaused) {
+    if (Number.isFinite(t.pausedRemaining)) return Math.max(0, (t.pausedRemaining as number) || 0);
+    if (Number.isFinite(t.targetTs)) return Math.max(0, (t.targetTs as number) - nowMs);
+    return 0;
+  }
+  if (Number.isFinite(t.targetTs)) return Math.max(0, (t.targetTs as number) - nowMs);
+  return 0;
+}
+
+function computeTimerTotalMs(t: TimerData, remaining: number, nowMs: number) {
+  if (Number.isFinite(t.durationMs)) {
+    const base = Math.max(0, t.durationMs as number);
+    return Math.max(base, remaining);
+  }
+  if (Number.isFinite(t.targetTs) && Number.isFinite(t.created)) {
+    const diff = (t.targetTs as number) - (t.created as number);
+    if (Number.isFinite(diff) && diff > 0) return Math.max(diff, remaining);
+  }
+  if (t.isPaused && Number.isFinite(t.pausedRemaining)) {
+    const rem = Math.max(0, (t.pausedRemaining as number) || 0);
+    return Math.max(rem, remaining);
+  }
+  if (Number.isFinite(t.targetTs)) {
+    const diff = Math.max(0, (t.targetTs as number) - nowMs);
+    return Math.max(diff, remaining);
+  }
+  return remaining || 1;
+}
+
+function resolveTimerColor(t: TimerData, index: number) {
+  return sanitizeTimerColor(t.color, index);
 }
 
 interface TimerRowProps {
   t: TimerData;
+  meta: TimerDisplayData;
   onAddMinutes: (minutes: number) => void;
   onPause: (pause: boolean) => void;
   onReset: () => void;
   onDelete: () => void;
   onCopy: () => void;
+  onColorChange: (color: string) => void;
 }
 
-function TimerRow({ t, onAddMinutes, onPause, onReset, onDelete, onCopy }: TimerRowProps) {
-  const rem = t.isPaused
-    ? Number.isFinite(t.pausedRemaining)
-      ? (t.pausedRemaining as number)
-      : Math.max(0, (t.targetTs ?? 0) - now())
-    : Math.max(0, (t.targetTs ?? 0) - now());
+function TimerRow({ t, meta, onAddMinutes, onPause, onReset, onDelete, onCopy, onColorChange }: TimerRowProps) {
+  const remaining = meta.remainingMs;
+  const statusLabel = t.isPaused
+    ? `Paused (${formatDHMS(remaining)})`
+    : remaining <= 0
+    ? "Ready"
+    : `${formatDHMS(remaining)} (${formatMMSS(remaining)})`;
+  const colorValue = t.color ?? meta.colorResolved;
   return (
-    <div style={cardRowStyle()}>
-      <div>
-        <div style={{ fontWeight: 600 }}>{t.label || "Timer"}</div>
-        <div style={{ fontSize: 13, color: COLOR.subtle }}>Remaining</div>
-        <div style={{ fontSize: 14 }}>
-          {formatDHMS(rem)} ({formatMMSS(rem)})
+    <div style={cardRowStyle(meta.colorResolved)}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label
+            style={{
+              width: 20,
+              height: 20,
+              borderRadius: "50%",
+              background: colorValue,
+              border: `1px solid ${COLOR.border}`,
+              boxShadow: "0 0 6px rgba(0,0,0,0.45)",
+              cursor: "pointer",
+              position: "relative",
+              flexShrink: 0,
+            }}
+            title="Change timer color"
+          >
+            <input
+              type="color"
+              value={colorValue}
+              onChange={(e) => onColorChange(e.target.value)}
+              style={{
+                position: "absolute",
+                inset: 0,
+                opacity: 0,
+                cursor: "pointer",
+              }}
+            />
+          </label>
+          <div>
+            <div style={{ fontWeight: 600, wordBreak: "break-word" }}>{t.label || "Timer"}</div>
+            <div style={{ fontSize: 13, color: COLOR.subtle }}>Remaining</div>
+            <div style={{ fontSize: 14 }}>{statusLabel}</div>
+          </div>
+        </div>
+        <div
+          style={{
+            marginTop: 10,
+            height: 6,
+            background: COLOR.border,
+            borderRadius: 999,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              width: `${meta.progress * 100}%`,
+              background: meta.colorResolved,
+              height: "100%",
+              transition: "width 0.3s ease",
+            }}
+          />
         </div>
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -764,7 +970,7 @@ function TimerRow({ t, onAddMinutes, onPause, onReset, onDelete, onCopy }: Timer
   );
 }
 
-function cardRowStyle(): React.CSSProperties {
+function cardRowStyle(accent?: string): React.CSSProperties {
   return {
     background: COLOR.card,
     border: `1px solid ${COLOR.border}`,
@@ -773,6 +979,9 @@ function cardRowStyle(): React.CSSProperties {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 12,
+    borderLeft: accent ? `4px solid ${accent}` : undefined,
+    paddingLeft: accent ? 16 : 12,
   };
 }
 
@@ -780,6 +989,109 @@ interface AbsTimer {
   id: string;
   label?: string;
   ts: number;
+  color?: string;
+  created?: number;
+  durationMs?: number;
+}
+
+interface AbsTimerDisplayData extends AbsTimer {
+  remainingMs: number;
+  totalMs: number;
+  progress: number;
+  colorResolved: string;
+}
+
+type TimerOverviewItem =
+  | { kind: "flex"; timer: TimerDisplayData }
+  | { kind: "abs"; timer: AbsTimerDisplayData };
+
+function TimerOverviewList({ items }: { items: TimerOverviewItem[] }) {
+  if (!items.length)
+    return (
+      <p style={{ color: COLOR.subtle, fontSize: 13, marginTop: 6, marginBottom: 0 }}>
+        No timers tracked yet.
+      </p>
+    );
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {items.map((entry) => {
+        const { kind, timer } = entry;
+        const label = timer.label || "Timer";
+        const baseStatus = `${formatDHMS(timer.remainingMs)} (${formatMMSS(timer.remainingMs)})`;
+        const status =
+          kind === "flex"
+            ? timer.isPaused
+              ? `Paused (${formatDHMS(timer.remainingMs)})`
+              : timer.remainingMs <= 0
+              ? "Ready"
+              : baseStatus
+            : timer.remainingMs <= 0
+            ? "Ready"
+            : baseStatus;
+        const subLabel =
+          kind === "abs"
+            ? `At ${new Date(timer.ts).toLocaleString(undefined, { timeZone: TZ })}`
+            : undefined;
+        return (
+          <div
+            key={`${kind}:${timer.id}`}
+            style={{
+              background: COLOR.bg,
+              border: `1px solid ${COLOR.border}`,
+              borderRadius: 12,
+              padding: 10,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
+                <span
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: "50%",
+                    background: timer.colorResolved,
+                    border: `1px solid ${COLOR.border}`,
+                    boxShadow: "0 0 4px rgba(0,0,0,0.45)",
+                  }}
+                />
+                <span style={{ wordBreak: "break-word" }}>{label}</span>
+              </span>
+              <span style={{ color: COLOR.subtle, fontSize: 12 }}>{status}</span>
+            </div>
+            {subLabel ? (
+              <div style={{ fontSize: 12, color: COLOR.subtle, marginTop: 4 }}>{subLabel}</div>
+            ) : null}
+            <div
+              style={{
+                marginTop: 6,
+                height: 4,
+                background: COLOR.border,
+                borderRadius: 999,
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  width: `${timer.progress * 100}%`,
+                  background: timer.colorResolved,
+                  height: "100%",
+                  transition: "width 0.3s ease",
+                }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 interface OverlayViewProps {
@@ -984,19 +1296,136 @@ export default function UmaResourceTracker() {
   }, []);
 
   useEffect(() => {
+    const nowMs = now();
     setTimers((prev) =>
-      prev.map((t) => {
-        if (t && t.targetTs) return t;
-        const rem = Number.isFinite(t?.remainingMs) ? t?.remainingMs || 0 : 0;
-        return {
+      prev.map((t, index) => {
+        if (!t)
+          return {
+            id: crypto.randomUUID(),
+            label: "Timer",
+            targetTs: nowMs,
+            isPaused: false,
+            pausedRemaining: null,
+            created: nowMs,
+            color: defaultTimerColor(index),
+            durationMs: 0,
+          };
+        const rem = Number.isFinite(t.remainingMs) ? (t.remainingMs as number) : 0;
+        const hasTarget = Number.isFinite(t.targetTs);
+        const created = Number.isFinite(t.created) ? (t.created as number) : nowMs;
+        const candidate: TimerData = {
           ...t,
-          targetTs: now() + rem,
-          pausedRemaining: t?.isPaused ? rem : null,
+          targetTs: hasTarget ? (t.targetTs as number) : nowMs + rem,
+          pausedRemaining: t.isPaused ? (Number.isFinite(t.pausedRemaining) ? t.pausedRemaining : rem) : null,
+          created,
+        };
+        const remaining = computeTimerRemainingMs(candidate, nowMs);
+        const duration = Number.isFinite(t.durationMs)
+          ? Math.max(0, t.durationMs as number)
+          : computeTimerTotalMs(candidate, remaining, nowMs);
+        return {
+          ...candidate,
+          color: sanitizeTimerColor(candidate.color, index),
+          durationMs: duration,
         };
       })
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const nowMs = now();
+    setAbsTimers((prev) =>
+      prev.map((a, index) => {
+        if (!a)
+          return {
+            id: crypto.randomUUID(),
+            label: "Timer",
+            ts: nowMs,
+            created: nowMs,
+            durationMs: 0,
+            color: defaultTimerColor(index),
+          };
+        const ts = Number.isFinite(a.ts) ? (a.ts as number) : nowMs;
+        const created = Number.isFinite(a.created) ? (a.created as number) : nowMs;
+        const remaining = Math.max(0, ts - nowMs);
+        const baseDuration = Number.isFinite(a.durationMs)
+          ? Math.max(0, a.durationMs as number)
+          : Math.max(ts - created, 0);
+        return {
+          id: typeof a.id === "string" && a.id ? a.id : crypto.randomUUID(),
+          label: typeof a.label === "string" ? a.label : undefined,
+          ts,
+          created,
+          durationMs: Math.max(baseDuration, remaining),
+          color: sanitizeTimerColor(a.color, index),
+        };
+      })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const decoratedTimers = useMemo(() => {
+    const nowMs = now();
+    return timers.map((t, index) => {
+      const remaining = computeTimerRemainingMs(t, nowMs);
+      const total = computeTimerTotalMs(t, remaining, nowMs);
+      const colorResolved = resolveTimerColor(t, index);
+      const progress = total > 0 ? clamp(1 - remaining / total, 0, 1) : 1;
+      return { ...t, remainingMs: remaining, totalMs: total, progress, colorResolved } as TimerDisplayData;
+    });
+  }, [timers, tick]);
+
+  const decoratedAbsTimers = useMemo(() => {
+    const nowMs = now();
+    return absTimers.map((a, index) => {
+      const ts = Number.isFinite(a.ts) ? (a.ts as number) : nowMs;
+      const remaining = Math.max(0, ts - nowMs);
+      const created = Number.isFinite(a.created) ? (a.created as number) : nowMs;
+      const baseDuration = Number.isFinite(a.durationMs)
+        ? Math.max(0, a.durationMs as number)
+        : Math.max(ts - created, 0);
+      const total = Math.max(baseDuration, remaining, 1);
+      const colorResolved = sanitizeTimerColor(a.color, index);
+      const progress = total > 0 ? clamp(1 - remaining / total, 0, 1) : 1;
+      return {
+        ...a,
+        remainingMs: remaining,
+        totalMs: total,
+        progress,
+        colorResolved,
+      } as AbsTimerDisplayData;
+    });
+  }, [absTimers, tick]);
+
+  const timerOverview = useMemo(() => {
+    const items: TimerOverviewItem[] = [
+      ...decoratedTimers.map((t) => ({ kind: "flex" as const, timer: t })),
+      ...decoratedAbsTimers.map((t) => ({ kind: "abs" as const, timer: t })),
+    ];
+    items.sort((a, b) => {
+      const weight = (entry: TimerOverviewItem) => {
+        if (entry.kind === "flex") {
+          const t = entry.timer;
+          if (!t.isPaused && t.remainingMs > 0) return 0;
+          if (t.isPaused && t.remainingMs > 0) return 1;
+          return 2;
+        }
+        return entry.timer.remainingMs > 0 ? 0 : 2;
+      };
+      const wa = weight(a);
+      const wb = weight(b);
+      if (wa !== wb) return wa - wb;
+      return a.timer.remainingMs - b.timer.remainingMs;
+    });
+    return items;
+  }, [decoratedTimers, decoratedAbsTimers]);
+
+  const nextTimerColor = useMemo(() => defaultTimerColor(timers.length), [timers.length]);
+  const nextAbsTimerColor = useMemo(
+    () => defaultTimerColor(timers.length + absTimers.length),
+    [timers.length, absTimers.length]
+  );
 
   const curTP = useMemo(
     () => computeCurrent(tp.base, tp.last, TP_RATE_MS, TP_CAP, tp.nextOverride, now()),
@@ -1081,36 +1510,46 @@ export default function UmaResourceTracker() {
     if (kind === "tp") setTP((prev) => ({ ...prev, nextOverride: target }));
     else setRP((prev) => ({ ...prev, nextOverride: target }));
   }
-  function addTimer(label: string, input: string) {
+  function addTimer(label: string, input: string, colorInput: string) {
     const ms = parseFlexible(input);
     if (ms == null) return;
-    const t: TimerData = {
-      id: crypto.randomUUID(),
-      label,
-      targetTs: now() + ms,
-      isPaused: false,
-      pausedRemaining: null,
-      created: now(),
-    };
-    setTimers((prev) => [...prev, t]);
+    const nowMs = now();
+    setTimers((prev) => {
+      const color = sanitizeTimerColor(colorInput, prev.length);
+      const t: TimerData = {
+        id: crypto.randomUUID(),
+        label,
+        targetTs: nowMs + ms,
+        isPaused: false,
+        pausedRemaining: null,
+        created: nowMs,
+        color,
+        durationMs: ms,
+      };
+      return [...prev, t];
+    });
   }
   function pauseTimer(id: string, pause: boolean) {
+    const nowMs = now();
     setTimers((prev) =>
       prev.map((t) => {
         if (t.id !== id) return t;
         if (pause && !t.isPaused) {
+          const remaining = Number.isFinite(t.targetTs) ? Math.max(0, (t.targetTs as number) - nowMs) : 0;
           return {
             ...t,
             isPaused: true,
-            pausedRemaining: Math.max(0, (t.targetTs ?? now()) - now()),
+            pausedRemaining: remaining,
           };
         }
         if (!pause && t.isPaused) {
-          const rem = Number.isFinite(t.pausedRemaining) ? t.pausedRemaining || 0 : 0;
+          const rem = Number.isFinite(t.pausedRemaining)
+            ? Math.max(0, (t.pausedRemaining as number) || 0)
+            : Math.max(0, (t.targetTs ?? nowMs) - nowMs);
           return {
             ...t,
             isPaused: false,
-            targetTs: now() + rem,
+            targetTs: nowMs + rem,
             pausedRemaining: null,
           };
         }
@@ -1120,30 +1559,84 @@ export default function UmaResourceTracker() {
   }
   function addMinutes(id: string, mins: number) {
     const delta = mins * 60000;
+    const nowMs = now();
     setTimers((prev) =>
-      prev.map((t) => {
+      prev.map((t, index) => {
         if (t.id !== id) return t;
+        const baseDuration = Number.isFinite(t.durationMs)
+          ? Math.max(0, t.durationMs as number)
+          : computeTimerTotalMs(t, computeTimerRemainingMs(t, nowMs), nowMs);
         if (t.isPaused) {
           const rem = Number.isFinite(t.pausedRemaining)
-            ? t.pausedRemaining || Math.max(0, (t.targetTs ?? now()) - now())
-            : Math.max(0, (t.targetTs ?? now()) - now());
-          return { ...t, pausedRemaining: rem + delta };
+            ? Math.max(0, (t.pausedRemaining as number) || 0)
+            : Math.max(0, (t.targetTs ?? nowMs) - nowMs);
+          return {
+            ...t,
+            pausedRemaining: rem + delta,
+            durationMs: Math.max(0, baseDuration + delta),
+            color: sanitizeTimerColor(t.color, index),
+          };
         }
-        return { ...t, targetTs: (t.targetTs ?? now()) + delta };
+        const targetBase = Number.isFinite(t.targetTs) ? (t.targetTs as number) : nowMs;
+        return {
+          ...t,
+          targetTs: targetBase + delta,
+          durationMs: Math.max(0, baseDuration + delta),
+          color: sanitizeTimerColor(t.color, index),
+        };
       })
     );
   }
   function resetTimer(id: string) {
-    setTimers((prev) => prev.map((t) => (t.id === id ? { ...t, isPaused: true, pausedRemaining: 0 } : t)));
+    setTimers((prev) =>
+      prev.map((t, index) =>
+        t.id === id
+          ? {
+              ...t,
+              isPaused: true,
+              pausedRemaining: 0,
+              durationMs: Number.isFinite(t.durationMs) ? Math.max(0, t.durationMs as number) : 0,
+              color: sanitizeTimerColor(t.color, index),
+            }
+          : t
+      )
+    );
+  }
+  function changeTimerColor(id: string, colorInput: string) {
+    setTimers((prev) =>
+      prev.map((t, index) => (t.id === id ? { ...t, color: sanitizeTimerColor(colorInput, index) } : t))
+    );
   }
   function deleteTimer(id: string) {
     setTimers((prev) => prev.filter((t) => t.id !== id));
   }
-  function addAbsTimer(label: string, whenTs: string) {
+  function addAbsTimer(label: string, whenTs: string, colorInput: string) {
     if (!whenTs) return;
     const ts = new Date(whenTs).getTime();
-    if (!Number.isNaN(ts))
-      setAbsTimers((prev) => [...prev, { id: crypto.randomUUID(), label, ts }]);
+    if (!Number.isNaN(ts)) {
+      const nowMs = now();
+      setAbsTimers((prev) => {
+        const index = prev.length;
+        const color = sanitizeTimerColor(colorInput, index);
+        const remaining = Math.max(0, ts - nowMs);
+        return [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            label,
+            ts,
+            created: nowMs,
+            durationMs: Math.max(remaining, 0),
+            color,
+          },
+        ];
+      });
+    }
+  }
+  function changeAbsTimerColor(id: string, colorInput: string) {
+    setAbsTimers((prev) =>
+      prev.map((a, index) => (a.id === id ? { ...a, color: sanitizeTimerColor(colorInput, index) } : a))
+    );
   }
   function deleteAbs(id: string) {
     setAbsTimers((prev) => prev.filter((x) => x.id !== id));
@@ -1191,8 +1684,12 @@ export default function UmaResourceTracker() {
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
       <Header hud={hud} />
 
-      <Card title="Daily Reset (10:00 AM Central)">
+      <Card title="Timer Overview">
         <CountdownRow targetMs={nextReset} />
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 13, color: COLOR.subtle, marginBottom: 6 }}>Tracked timers</div>
+          <TimerOverviewList items={timerOverview} />
+        </div>
         <RowRight>
           <SmallBtn onClick={() => copyOverlayURL("reset")}>Copy Overlay URL</SmallBtn>
         </RowRight>
@@ -1300,20 +1797,22 @@ export default function UmaResourceTracker() {
       </div>
 
       <Card title="Custom Flexible Timers">
-        <AddTimerForm onAdd={addTimer} />
+        <AddTimerForm onAdd={addTimer} defaultColor={nextTimerColor} />
         <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12 }}>
-          {timers.length === 0 ? (
+          {decoratedTimers.length === 0 ? (
             <p style={{ color: COLOR.subtle, fontSize: 14 }}>No custom timers yet.</p>
           ) : (
-            timers.map((t) => (
+            decoratedTimers.map((meta) => (
               <TimerRow
-                key={t.id}
-                t={t}
-                onAddMinutes={(m) => addMinutes(t.id, m)}
-                onPause={(p) => pauseTimer(t.id, p)}
-                onReset={() => resetTimer(t.id)}
-                onDelete={() => deleteTimer(t.id)}
-                onCopy={() => copyOverlayURL("timer", t.id)}
+                key={meta.id}
+                t={meta}
+                meta={meta}
+                onAddMinutes={(m) => addMinutes(meta.id, m)}
+                onPause={(p) => pauseTimer(meta.id, p)}
+                onReset={() => resetTimer(meta.id)}
+                onDelete={() => deleteTimer(meta.id)}
+                onCopy={() => copyOverlayURL("timer", meta.id)}
+                onColorChange={(color) => changeTimerColor(meta.id, color)}
               />
             ))
           )}
@@ -1321,27 +1820,75 @@ export default function UmaResourceTracker() {
       </Card>
 
       <Card title="Exact Date/Time Timers">
-        <AddAbsTimerForm onAdd={addAbsTimer} />
+        <AddAbsTimerForm onAdd={addAbsTimer} defaultColor={nextAbsTimerColor} />
         <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12 }}>
-          {absTimers.length === 0 ? (
+          {decoratedAbsTimers.length === 0 ? (
             <p style={{ color: COLOR.subtle, fontSize: 14 }}>No exact timers yet.</p>
           ) : (
-            absTimers.map((a) => {
-              const rem = a.ts - now();
+            decoratedAbsTimers.map((meta) => {
+              const rem = meta.remainingMs;
               return (
-                <div key={a.id} style={cardRowStyle()}>
-                  <div>
-                    <div style={{ fontWeight: 600 }}>{a.label || "Timer"}</div>
-                    <div style={{ fontSize: 13, color: COLOR.subtle }}>
-                      At: {new Date(a.ts).toLocaleString(undefined, { timeZone: TZ })}
+                <div key={meta.id} style={cardRowStyle(meta.colorResolved)}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <label
+                        style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: "50%",
+                          background: meta.colorResolved,
+                          border: `1px solid ${COLOR.border}`,
+                          boxShadow: "0 0 6px rgba(0,0,0,0.45)",
+                          cursor: "pointer",
+                          position: "relative",
+                          flexShrink: 0,
+                        }}
+                        title="Change timer color"
+                      >
+                        <input
+                          type="color"
+                          value={meta.colorResolved}
+                          onChange={(e) => changeAbsTimerColor(meta.id, e.target.value)}
+                          style={{
+                            position: "absolute",
+                            inset: 0,
+                            opacity: 0,
+                            cursor: "pointer",
+                          }}
+                        />
+                      </label>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, wordBreak: "break-word" }}>{meta.label || "Timer"}</div>
+                        <div style={{ fontSize: 13, color: COLOR.subtle }}>
+                          At: {new Date(meta.ts).toLocaleString(undefined, { timeZone: TZ })}
+                        </div>
+                        <div style={{ fontSize: 14 }}>
+                          Time left: {formatDHMS(rem)} ({formatMMSS(rem)})
+                        </div>
+                      </div>
                     </div>
-                    <div style={{ fontSize: 14 }}>
-                      Time left: {formatDHMS(rem)} ({formatMMSS(rem)})
+                    <div
+                      style={{
+                        marginTop: 10,
+                        height: 6,
+                        background: COLOR.border,
+                        borderRadius: 999,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${meta.progress * 100}%`,
+                          background: meta.colorResolved,
+                          height: "100%",
+                          transition: "width 0.3s ease",
+                        }}
+                      />
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <SmallBtn onClick={() => copyOverlayURL("abs", a.id)}>Copy Overlay URL</SmallBtn>
-                    <SmallBtn danger onClick={() => deleteAbs(a.id)}>
+                    <SmallBtn onClick={() => copyOverlayURL("abs", meta.id)}>Copy Overlay URL</SmallBtn>
+                    <SmallBtn danger onClick={() => deleteAbs(meta.id)}>
                       Delete
                     </SmallBtn>
                   </div>
