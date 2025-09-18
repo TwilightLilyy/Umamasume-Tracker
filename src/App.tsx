@@ -228,6 +228,16 @@ function sanitizeTimerColor(color: string | undefined, index: number) {
   return valid ? hex : defaultTimerColor(index);
 }
 
+function normalizeGroupName(name: string) {
+  return name.trim().toLowerCase();
+}
+
+function findFallbackGroupId(groups: AbsTimerGroup[]) {
+  if (!groups.length) return DEFAULT_ABS_TIMER_GROUPS[0].id;
+  const other = groups.find((g) => normalizeGroupName(g.name).includes("other"));
+  return other?.id ?? groups[0].id;
+}
+
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
 function hexToRgb(hex: string) {
@@ -1256,6 +1266,101 @@ function formatDateTimeLocalInput(ts: number) {
   return local.toISOString().slice(0, 16);
 }
 
+interface TimerImportExportControlsProps {
+  groups: AbsTimerGroup[];
+  timers: AbsTimer[];
+  onImport: (bundle: TimerImportBundle) => TimerImportResult;
+}
+
+function TimerImportExportControls({ groups, timers, onImport }: TimerImportExportControlsProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState<string | null>(null);
+
+  const handleExport = useCallback(() => {
+    try {
+      if (typeof window === "undefined" || typeof document === "undefined") {
+        setImportError("Export is only available in the browser.");
+        setImportSuccess(null);
+        return;
+      }
+      const payload = createTimerExportPayload(groups, timers);
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `uma-custom-timers-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.warn("Failed to export timers", error);
+      setImportError("Failed to export timers.");
+      setImportSuccess(null);
+    }
+  }, [groups, timers]);
+
+  const handleOpenFile = useCallback(() => {
+    setImportError(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileChange = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        const sanitized = sanitizeTimerImportData(parsed);
+        if (!sanitized) throw new Error("Invalid payload");
+        const result = onImport(sanitized);
+        if (result.addedTimers === 0 && result.addedGroups === 0 && result.updatedGroups === 0) {
+          setImportSuccess("No new timers to import.");
+        } else {
+          const parts = [
+            result.addedTimers > 0 ? `${result.addedTimers} timer${result.addedTimers === 1 ? "" : "s"}` : null,
+            result.addedGroups > 0 ? `${result.addedGroups} new group${result.addedGroups === 1 ? "" : "s"}` : null,
+            result.updatedGroups > 0
+              ? `${result.updatedGroups} group${result.updatedGroups === 1 ? "" : "s"} updated`
+              : null,
+          ].filter(Boolean);
+          setImportSuccess(parts.join(", "));
+        }
+        setImportError(null);
+      } catch (error) {
+        console.warn("Failed to import timers", error);
+        setImportError("Failed to import timers. Please check the file format.");
+        setImportSuccess(null);
+      } finally {
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    },
+    [onImport]
+  );
+
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <SmallBtn onClick={handleExport} disabled={timers.length === 0}>Export timers</SmallBtn>
+      <SmallBtn onClick={handleOpenFile}>Import timers</SmallBtn>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/json,.json"
+        onChange={handleFileChange}
+        style={{ display: "none" }}
+      />
+      {importError && <span style={{ color: COLOR.danger, fontSize: 12 }}>{importError}</span>}
+      {importSuccess && !importError && (
+        <span style={{ color: COLOR.good, fontSize: 12 }}>{importSuccess}</span>
+      )}
+    </div>
+  );
+}
+
 interface AddAbsTimerFormProps {
   onAdd: (groupId: string, label: string, dateTime: string) => void;
   groups: AbsTimerGroup[];
@@ -1968,6 +2073,225 @@ interface AbsTimerDisplay extends AbsTimer {
   status: AbsTimerStatus;
 }
 
+interface TimerExportPayload {
+  version: number;
+  generatedAt: string;
+  groups: AbsTimerGroup[];
+  timers: {
+    id: string;
+    label?: string;
+    ts: number;
+    status: AbsTimerStatus;
+    groupId: string;
+    groupName: string;
+  }[];
+}
+
+interface TimerImportGroupData {
+  id?: string;
+  name: string;
+  color: string;
+}
+
+interface TimerImportTimerData {
+  id?: string;
+  label?: string;
+  ts: number;
+  groupId?: string;
+  groupName?: string;
+  status: AbsTimerStatus;
+}
+
+interface TimerImportBundle {
+  groups: TimerImportGroupData[];
+  timers: TimerImportTimerData[];
+}
+
+interface TimerImportResult {
+  addedGroups: number;
+  updatedGroups: number;
+  addedTimers: number;
+}
+
+function createTimerExportPayload(groups: AbsTimerGroup[], timers: AbsTimer[]): TimerExportPayload {
+  const groupMap = new Map(groups.map((g, index) => [g.id, { ...g, color: sanitizeTimerColor(g.color, index) }]));
+  const exportedGroups = groups.map((g, index) => ({
+    id: g.id,
+    name: g.name,
+    color: sanitizeTimerColor(g.color, index),
+  }));
+  const exportedTimers = timers.map((t) => {
+    const group = groupMap.get(t.groupId);
+    const status: AbsTimerStatus =
+      t.status === "completed" || t.status === "expired" ? t.status : "active";
+    return {
+      id: t.id,
+      label: t.label,
+      ts: t.ts,
+      status,
+      groupId: group?.id ?? t.groupId,
+      groupName: group?.name ?? "",
+    };
+  });
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    groups: exportedGroups,
+    timers: exportedTimers,
+  };
+}
+
+function sanitizeTimerImportData(value: unknown): TimerImportBundle | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const groupInput = Array.isArray(raw.groups) ? raw.groups : [];
+  const timerInput = Array.isArray(raw.timers) ? raw.timers : [];
+  const groups: TimerImportGroupData[] = [];
+  groupInput.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object") return;
+    const g = entry as Record<string, unknown>;
+    const idRaw = typeof g.id === "string" ? g.id.trim() : undefined;
+    const nameRaw = typeof g.name === "string" ? g.name.trim() : "";
+    const colorRaw = typeof g.color === "string" ? g.color.trim() : undefined;
+    const name = nameRaw || `Group ${index + 1}`;
+    const color = sanitizeTimerColor(colorRaw, index);
+    groups.push({ id: idRaw && idRaw.length ? idRaw : undefined, name, color });
+  });
+  const timers: TimerImportTimerData[] = [];
+  const validStatus = new Set<AbsTimerStatus>(["active", "completed", "expired"]);
+  timerInput.forEach((entry) => {
+    if (!entry || typeof entry !== "object") return;
+    const t = entry as Record<string, unknown>;
+    const ts = Number(t.ts);
+    if (!Number.isFinite(ts)) return;
+    const label = typeof t.label === "string" ? t.label.trim() : undefined;
+    const groupId = typeof t.groupId === "string" ? t.groupId.trim() : undefined;
+    const groupName = typeof t.groupName === "string" ? t.groupName.trim() : undefined;
+    const statusRaw = typeof t.status === "string" ? t.status.trim().toLowerCase() : "active";
+    const status = validStatus.has(statusRaw as AbsTimerStatus)
+      ? (statusRaw as AbsTimerStatus)
+      : "active";
+    timers.push({
+      id: typeof t.id === "string" ? t.id.trim() || undefined : undefined,
+      label,
+      ts,
+      groupId: groupId && groupId.length ? groupId : undefined,
+      groupName: groupName && groupName.length ? groupName : undefined,
+      status,
+    });
+  });
+  if (!groups.length && !timers.length) return null;
+  return { groups, timers };
+}
+
+function mergeImportedGroups(
+  existing: AbsTimerGroup[],
+  imported: TimerImportGroupData[]
+): {
+  nextGroups: AbsTimerGroup[];
+  idMap: Map<string, string>;
+  nameMap: Map<string, string>;
+  added: number;
+  updated: number;
+} {
+  if (!imported.length) {
+    const nameMap = new Map(existing.map((g) => [normalizeGroupName(g.name), g.id]));
+    return { nextGroups: existing, idMap: new Map(), nameMap, added: 0, updated: 0 };
+  }
+  const next = existing.map((g) => ({ ...g }));
+  const idIndex = new Map<string, number>();
+  const nameIndex = new Map<string, number>();
+  next.forEach((group, idx) => {
+    idIndex.set(group.id, idx);
+    nameIndex.set(normalizeGroupName(group.name), idx);
+  });
+  const idMap = new Map<string, string>();
+  let added = 0;
+  let updated = 0;
+  imported.forEach((group) => {
+    const trimmedName = group.name.trim() || `Group ${next.length + added + 1}`;
+    const normalizedName = normalizeGroupName(trimmedName);
+    const rawId = group.id?.trim();
+    let targetIdx: number | undefined;
+    if (rawId && idIndex.has(rawId)) {
+      targetIdx = idIndex.get(rawId);
+    } else if (normalizedName && nameIndex.has(normalizedName)) {
+      targetIdx = nameIndex.get(normalizedName);
+    }
+    if (targetIdx != null) {
+      const current = next[targetIdx];
+      const sanitizedColor = sanitizeTimerColor(group.color, targetIdx);
+      const sanitizedName = trimmedName;
+      if (current.name !== sanitizedName || current.color !== sanitizedColor) {
+        next[targetIdx] = { ...current, name: sanitizedName, color: sanitizedColor };
+        updated += 1;
+      }
+      if (rawId) idMap.set(rawId, next[targetIdx].id);
+      if (normalizedName) nameIndex.set(normalizedName, targetIdx);
+      return;
+    }
+    const sanitizedColor = sanitizeTimerColor(group.color, next.length);
+    const newId = rawId && !idIndex.has(rawId) ? rawId : crypto.randomUUID();
+    const finalName = trimmedName || `Group ${next.length + 1}`;
+    const newGroup: AbsTimerGroup = { id: newId, name: finalName, color: sanitizedColor };
+    next.push(newGroup);
+    idIndex.set(newId, next.length - 1);
+    if (normalizedName) nameIndex.set(normalizedName, next.length - 1);
+    if (rawId) idMap.set(rawId, newId);
+    added += 1;
+  });
+  const nameMap = new Map<string, string>();
+  next.forEach((group) => nameMap.set(normalizeGroupName(group.name), group.id));
+  return {
+    nextGroups: added === 0 && updated === 0 ? existing : next,
+    idMap,
+    nameMap,
+    added,
+    updated,
+  };
+}
+
+function prepareImportedTimers(
+  imported: TimerImportTimerData[],
+  groups: AbsTimerGroup[],
+  idMap: Map<string, string>,
+  nameMap: Map<string, string>
+): AbsTimer[] {
+  if (!imported.length) return [];
+  const groupIdSet = new Set(groups.map((g) => g.id));
+  const fallbackId = findFallbackGroupId(groups);
+  const normalizedNameMap = new Map(groups.map((g) => [normalizeGroupName(g.name), g.id]));
+  const result: AbsTimer[] = [];
+  imported.forEach((timer) => {
+    let targetGroupId: string | undefined;
+    if (timer.groupId) {
+      const mapped = idMap.get(timer.groupId) ?? timer.groupId;
+      if (groupIdSet.has(mapped)) targetGroupId = mapped;
+    }
+    if (!targetGroupId && timer.groupName) {
+      const normalized = normalizeGroupName(timer.groupName);
+      const mapped = nameMap.get(normalized) ?? normalizedNameMap.get(normalized);
+      if (mapped && groupIdSet.has(mapped)) targetGroupId = mapped;
+    }
+    if (!targetGroupId) targetGroupId = fallbackId;
+    const label = timer.label?.trim() || "";
+    const status: AbsTimerStatus =
+      timer.status === "completed" || timer.status === "expired" ? timer.status : "active";
+    result.push({
+      id: crypto.randomUUID(),
+      label,
+      ts: timer.ts,
+      groupId: targetGroupId,
+      status,
+    });
+  });
+  return result;
+}
+
+function timerDedupKey(timer: AbsTimer) {
+  return `${timer.groupId}|${timer.label ?? ""}|${timer.ts}`;
+}
+
 interface OverlayViewProps {
   overlay: string;
   curTP: CurrentResource;
@@ -2247,11 +2571,10 @@ export default function UmaResourceTracker() {
     [rpRaw]
   );
 
-  const fallbackGroupId = useMemo(() => {
-    if (!absGroups.length) return DEFAULT_ABS_TIMER_GROUPS[0].id;
-    const other = absGroups.find((g) => g.name.toLowerCase().includes("other"));
-    return other?.id ?? absGroups[0].id;
-  }, [absGroups]);
+  const fallbackGroupId = useMemo(
+    () => findFallbackGroupId(absGroups.length ? absGroups : DEFAULT_ABS_TIMER_GROUPS),
+    [absGroups]
+  );
 
   const groupsForForms = absGroups.length ? absGroups : DEFAULT_ABS_TIMER_GROUPS;
   const formDefaultGroupId = groupsForForms.some((g) => g.id === fallbackGroupId)
@@ -2822,6 +3145,35 @@ export default function UmaResourceTracker() {
     setAbsTimers((prev) => prev.filter((x) => x.id !== id));
   }
 
+  const handleImportAbsTimers = useCallback(
+    (bundle: TimerImportBundle): TimerImportResult => {
+      const { nextGroups, idMap, nameMap, added, updated } = mergeImportedGroups(absGroups, bundle.groups);
+      if (nextGroups !== absGroups) setAbsGroups(nextGroups);
+      const prepared = prepareImportedTimers(bundle.timers, nextGroups, idMap, nameMap);
+      if (!prepared.length)
+        return {
+          addedGroups: added,
+          updatedGroups: updated,
+          addedTimers: 0,
+        };
+      const existingKeys = new Set(absTimers.map((t) => timerDedupKey(t)));
+      const unique: AbsTimer[] = [];
+      prepared.forEach((timer) => {
+        const key = timerDedupKey(timer);
+        if (existingKeys.has(key)) return;
+        existingKeys.add(key);
+        unique.push(timer);
+      });
+      if (unique.length) setAbsTimers((prev) => [...prev, ...unique]);
+      return {
+        addedGroups: added,
+        updatedGroups: updated,
+        addedTimers: unique.length,
+      };
+    },
+    [absGroups, absTimers, setAbsGroups, setAbsTimers]
+  );
+
   const q = useQuery();
   const hud = q.get("hud") === "1";
   const overlay = q.get("overlay");
@@ -3235,6 +3587,11 @@ export default function UmaResourceTracker() {
 
       <Card title="Exact Date/Time Timers">
         <div style={{ display: "grid", gap: 12 }}>
+          <TimerImportExportControls
+            groups={absGroups.length ? absGroups : DEFAULT_ABS_TIMER_GROUPS}
+            timers={absTimers}
+            onImport={handleImportAbsTimers}
+          />
           <AddGroupForm onAdd={addAbsGroup} defaultColor={nextGroupColor} />
           <AddAbsTimerForm
             onAdd={addAbsTimer}
