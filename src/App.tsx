@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const DEFAULT_TZ = "America/Chicago";
 
@@ -37,6 +37,167 @@ const TIMER_COLORS = [
   "#facc15",
   "#ec4899",
 ];
+
+const HOTKEY_THROTTLE_MS = 150;
+
+type HotkeyActionId = "tpSpend30" | "tpSpend1" | "rpSpend1" | "rpSpend5";
+
+interface HotkeyActionConfig {
+  id: HotkeyActionId;
+  label: string;
+  resource: "tp" | "rp";
+  amount: number;
+  defaultBinding: string | null;
+  verb: string;
+}
+
+const HOTKEY_ACTIONS: HotkeyActionConfig[] = [
+  { id: "tpSpend30", label: "Spend 30 TP", resource: "tp", amount: 30, defaultBinding: "t", verb: "Spent" },
+  { id: "tpSpend1", label: "Spend 1 TP", resource: "tp", amount: 1, defaultBinding: null, verb: "Spent" },
+  { id: "rpSpend1", label: "Use 1 RP", resource: "rp", amount: 1, defaultBinding: "r", verb: "Used" },
+  { id: "rpSpend5", label: "Use 5 RP", resource: "rp", amount: 5, defaultBinding: null, verb: "Used" },
+];
+
+type HotkeyBindings = Record<HotkeyActionId, string | null>;
+
+interface HotkeySettings {
+  enabled: boolean;
+  paused: boolean;
+  allowRepeat: boolean;
+  bindings: HotkeyBindings;
+}
+
+const DEFAULT_HOTKEY_SETTINGS: HotkeySettings = {
+  enabled: true,
+  paused: false,
+  allowRepeat: false,
+  bindings: HOTKEY_ACTIONS.reduce((acc, action) => {
+    acc[action.id] = action.defaultBinding;
+    return acc;
+  }, {} as HotkeyBindings),
+};
+
+const HOTKEY_ACTION_LOOKUP = new Map<HotkeyActionId, HotkeyActionConfig>(
+  HOTKEY_ACTIONS.map((action) => [action.id, action])
+);
+
+const MODIFIER_ORDER = ["ctrl", "alt", "shift", "meta"] as const;
+type ModifierKey = (typeof MODIFIER_ORDER)[number];
+const MODIFIER_SET = new Set<ModifierKey>(MODIFIER_ORDER);
+
+function canonicalKeyName(key: string | null | undefined) {
+  if (!key) return null;
+  const lower = key.toLowerCase();
+  if (lower === "" || lower === "dead" || lower === "unidentified") return null;
+  if (lower === " ") return "space";
+  if (lower === "spacebar") return "space";
+  if (lower === "escape") return "esc";
+  if (lower === "os") return "meta";
+  return lower;
+}
+
+function normalizeBindingString(binding: string | null | undefined): string | null {
+  if (!binding) return null;
+  const parts = binding
+    .split("+")
+    .map((part) => part.trim().toLowerCase())
+    .filter((part) => part.length > 0);
+  if (!parts.length) return null;
+  const modifiers: ModifierKey[] = [];
+  let keyPart: string | null = null;
+  for (const part of parts) {
+    if (MODIFIER_SET.has(part as ModifierKey)) {
+      const mod = part as ModifierKey;
+      if (!modifiers.includes(mod)) modifiers.push(mod);
+      continue;
+    }
+    keyPart = canonicalKeyName(part);
+  }
+  if (!keyPart) return null;
+  if (MODIFIER_SET.has(keyPart as ModifierKey)) return null;
+  const orderedModifiers = MODIFIER_ORDER.filter((mod) => modifiers.includes(mod));
+  return [...orderedModifiers, keyPart].join("+");
+}
+
+function bindingFromEvent(event: KeyboardEvent): string | null {
+  const modifiers: ModifierKey[] = [];
+  if (event.ctrlKey) modifiers.push("ctrl");
+  if (event.altKey) modifiers.push("alt");
+  if (event.shiftKey) modifiers.push("shift");
+  if (event.metaKey) modifiers.push("meta");
+  const keyPart = canonicalKeyName(event.key);
+  if (!keyPart) return null;
+  if (MODIFIER_SET.has(keyPart as ModifierKey) && modifiers.length === 0) return null;
+  const orderedModifiers = MODIFIER_ORDER.filter((mod) => modifiers.includes(mod));
+  return normalizeBindingString([...orderedModifiers, keyPart].join("+"));
+}
+
+function formatBinding(binding: string | null) {
+  if (!binding) return "Unassigned";
+  const parts = binding.split("+");
+  return parts
+    .map((part) => {
+      if (part === "ctrl") return "Ctrl";
+      if (part === "alt") return "Alt";
+      if (part === "shift") return "Shift";
+      if (part === "meta") return "Meta";
+      if (part === "space") return "Space";
+      if (part === "esc") return "Esc";
+      if (part.length === 1) return part.toUpperCase();
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(" + ");
+}
+
+function sanitizeHotkeySettings(settings: HotkeySettings | null | undefined) {
+  const base = settings && typeof settings === "object" ? settings : DEFAULT_HOTKEY_SETTINGS;
+  const sanitized: HotkeySettings = {
+    enabled: !!base.enabled,
+    paused: !!base.paused,
+    allowRepeat: !!base.allowRepeat,
+    bindings: { ...DEFAULT_HOTKEY_SETTINGS.bindings },
+  };
+  for (const action of HOTKEY_ACTIONS) {
+    const normalized = normalizeBindingString(base.bindings?.[action.id] ?? action.defaultBinding);
+    sanitized.bindings[action.id] = normalized;
+  }
+  return sanitized;
+}
+
+function hotkeySettingsEqual(a: HotkeySettings, b: HotkeySettings) {
+  if (a.enabled !== b.enabled || a.paused !== b.paused || a.allowRepeat !== b.allowRepeat) return false;
+  for (const action of HOTKEY_ACTIONS) {
+    if ((a.bindings[action.id] ?? null) !== (b.bindings[action.id] ?? null)) return false;
+  }
+  return true;
+}
+
+function isEditableElement(element: Element | null) {
+  if (!element) return false;
+  if (element instanceof HTMLInputElement) return true;
+  if (element instanceof HTMLTextAreaElement) return true;
+  if (element instanceof HTMLElement && element.isContentEditable) return true;
+  return false;
+}
+
+function hasActiveModal() {
+  if (typeof document === "undefined") return false;
+  const ariaModal = document.querySelector('[aria-modal="true"]:not([aria-hidden="true"])');
+  if (ariaModal) return true;
+  const openDialog = document.querySelector("dialog[open]");
+  if (openDialog) return true;
+  const roleDialog = document.querySelector('[role="dialog"]:not([aria-hidden="true"])');
+  return !!roleDialog;
+}
+
+function shouldIgnoreHotkeyEvent(event: KeyboardEvent) {
+  const target = event.target as Element | null;
+  if (isEditableElement(target)) return true;
+  const active = typeof document !== "undefined" ? document.activeElement : null;
+  if (isEditableElement(active)) return true;
+  if (hasActiveModal()) return true;
+  return false;
+}
 
 type AbsTimerStatus = "active" | "completed" | "expired";
 
@@ -402,9 +563,20 @@ interface HeaderProps {
   onOpenSettings: () => void;
   timeZone: string;
   isSettingsOpen: boolean;
+  hotkeysEnabled: boolean;
+  hotkeysPaused: boolean;
+  onToggleHotkeysPause: () => void;
 }
 
-function Header({ hud, onOpenSettings, timeZone, isSettingsOpen }: HeaderProps) {
+function Header({
+  hud,
+  onOpenSettings,
+  timeZone,
+  isSettingsOpen,
+  hotkeysEnabled,
+  hotkeysPaused,
+  onToggleHotkeysPause,
+}: HeaderProps) {
   const zone = ensureTimeZone(timeZone);
   return (
     <div
@@ -428,27 +600,36 @@ function Header({ hud, onOpenSettings, timeZone, isSettingsOpen }: HeaderProps) 
           Current time zone: {zone}
         </div>
       </div>
-      <button
-        type="button"
-        onClick={onOpenSettings}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "8px 12px",
-          borderRadius: 999,
-          background: isSettingsOpen ? COLOR.border : COLOR.slate700,
-          color: COLOR.text,
-          border: `1px solid ${COLOR.border}`,
-          fontSize: 13,
-          cursor: "pointer",
-        }}
-        title="Open settings"
-        aria-expanded={isSettingsOpen}
-      >
-        <span aria-hidden="true">⚙️</span>
-        <span>Settings</span>
-      </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {hotkeysEnabled ? (
+          <SmallBtn onClick={onToggleHotkeysPause}>
+            {hotkeysPaused ? "Resume hotkeys" : "Pause hotkeys"}
+          </SmallBtn>
+        ) : (
+          <span style={{ fontSize: 12, color: COLOR.subtle }}>Hotkeys disabled</span>
+        )}
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "8px 12px",
+            borderRadius: 999,
+            background: isSettingsOpen ? COLOR.border : COLOR.slate700,
+            color: COLOR.text,
+            border: `1px solid ${COLOR.border}`,
+            fontSize: 13,
+            cursor: "pointer",
+          }}
+          title="Open settings"
+          aria-expanded={isSettingsOpen}
+        >
+          <span aria-hidden="true">⚙️</span>
+          <span>Settings</span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -497,23 +678,26 @@ interface CheckboxProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
+  disabled?: boolean;
 }
 
-function Checkbox({ checked, onChange, label }: CheckboxProps) {
+function Checkbox({ checked, onChange, label, disabled }: CheckboxProps) {
   return (
     <label
       style={{
         display: "flex",
         alignItems: "center",
         gap: 6,
-        cursor: "pointer",
+        cursor: disabled ? "not-allowed" : "pointer",
         userSelect: "none",
+        opacity: disabled ? 0.6 : 1,
       }}
     >
       <input
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
+        disabled={disabled}
       />
       <span style={{ fontSize: 13 }}>{label}</span>
     </label>
@@ -560,9 +744,10 @@ interface SmallBtnProps {
   onClick: () => void;
   children: React.ReactNode;
   danger?: boolean;
+  disabled?: boolean;
 }
 
-function SmallBtn({ onClick, children, danger }: SmallBtnProps) {
+function SmallBtn({ onClick, children, danger, disabled }: SmallBtnProps) {
   const base = danger ? COLOR.danger : COLOR.slate700;
   const highlight = mixColor(base, "#ffffff", danger ? 0.35 : 0.25);
   const shadow = mixColor(base, "#000000", 0.3);
@@ -570,6 +755,7 @@ function SmallBtn({ onClick, children, danger }: SmallBtnProps) {
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       style={{
         padding: "6px 10px",
         fontSize: 12,
@@ -578,7 +764,9 @@ function SmallBtn({ onClick, children, danger }: SmallBtnProps) {
         color: COLOR.text,
         border: `1px solid ${withAlpha(mixColor(base, "#000000", 0.2), 0.9)}`,
         boxShadow: `0 8px 18px ${withAlpha(base, 0.28)}`,
-        cursor: "pointer",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.6 : 1,
+        filter: disabled ? "grayscale(0.15)" : undefined,
         transition: "transform 0.15s ease, box-shadow 0.15s ease",
       }}
     >
@@ -643,6 +831,120 @@ function Select({ value, onChange, children }: SelectProps) {
     >
       {children}
     </select>
+  );
+}
+
+interface KeyCaptureProps {
+  binding: string | null;
+  capturing: boolean;
+  onStartCapture: () => void;
+  onStopCapture: () => void;
+  onBindingChange: (binding: string | null) => void;
+  disabled?: boolean;
+}
+
+function KeyCapture({ binding, capturing, onStartCapture, onStopCapture, onBindingChange, disabled }: KeyCaptureProps) {
+  useEffect(() => {
+    if (!capturing) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === "Escape") {
+        onStopCapture();
+        return;
+      }
+      const next = bindingFromEvent(event);
+      if (!next) return;
+      onBindingChange(next);
+      onStopCapture();
+    };
+    const cancel = () => {
+      onStopCapture();
+    };
+    window.addEventListener("keydown", handleKeyDown, true);
+    window.addEventListener("mousedown", cancel, true);
+    window.addEventListener("touchstart", cancel, true);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener("mousedown", cancel, true);
+      window.removeEventListener("touchstart", cancel, true);
+    };
+  }, [capturing, onBindingChange, onStopCapture]);
+
+  const label = capturing ? "Press a key…" : formatBinding(binding);
+  const idleBackground = `linear-gradient(135deg, ${withAlpha(mixColor(COLOR.bg, "#ffffff", 0.08), 0.9)} 0%, ${withAlpha(
+    mixColor(COLOR.bg, "#000000", 0.4),
+    0.95
+  )} 100%)`;
+  const activeBackground = `linear-gradient(135deg, ${withAlpha(mixColor(COLOR.tp, "#ffffff", 0.3), 0.92)} 0%, ${withAlpha(
+    mixColor(COLOR.tp, "#000000", 0.25),
+    0.92
+  )} 100%)`;
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (disabled) return;
+        if (capturing) onStopCapture();
+        else onStartCapture();
+      }}
+      disabled={disabled}
+      title="Click, then press a key. Press Esc to cancel."
+      style={{
+        padding: "8px 12px",
+        borderRadius: 12,
+        border: `1px solid ${withAlpha(COLOR.border, 0.85)}`,
+        background: capturing ? activeBackground : idleBackground,
+        color: COLOR.text,
+        minWidth: 150,
+        textAlign: "left",
+        boxShadow: `0 6px 18px ${withAlpha("#000000", 0.3)}`,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.6 : 1,
+        fontSize: 12,
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+interface HotkeyToastState {
+  id: number;
+  message: string;
+}
+
+function HotkeyToast({ toast }: { toast: HotkeyToastState | null }) {
+  return (
+    <div
+      aria-live="polite"
+      aria-atomic="true"
+      style={{
+        position: "fixed",
+        bottom: 24,
+        right: 24,
+        pointerEvents: "none",
+        zIndex: 1000,
+        maxWidth: 320,
+      }}
+    >
+      {toast && (
+        <div
+          style={{
+            background: withAlpha(COLOR.card, 0.95),
+            border: `1px solid ${withAlpha(COLOR.border, 0.85)}`,
+            borderRadius: 12,
+            padding: "10px 14px",
+            color: COLOR.text,
+            boxShadow: `0 16px 32px ${withAlpha("#000000", 0.45)}`,
+            fontSize: 13,
+          }}
+        >
+          {toast.message}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1808,11 +2110,31 @@ export default function UmaResourceTracker() {
     resets: {},
   });
   const [timezone, setTimezone] = useLocalStorage<string>("uma.timezone", DEFAULT_TZ);
+  const [hotkeys, setHotkeys] = useLocalStorage<HotkeySettings>("uma.hotkeys", DEFAULT_HOTKEY_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tzDraft, setTzDraft] = useState(timezone);
   const [tzError, setTzError] = useState<string | null>(null);
+  const [hotkeyToast, setHotkeyToast] = useState<HotkeyToastState | null>(null);
+  const [activeHotkeyCapture, setActiveHotkeyCapture] = useState<HotkeyActionId | null>(null);
+  const handleHotkeyActionRef = useRef<(id: HotkeyActionId) => boolean>(() => false);
 
   const activeTimeZone = ensureTimeZone(timezone);
+
+  useEffect(() => {
+    setHotkeys((prev) => {
+      const sanitized = sanitizeHotkeySettings(prev);
+      return hotkeySettingsEqual(prev, sanitized) ? prev : sanitized;
+    });
+  }, [setHotkeys]);
+
+  useEffect(() => {
+    if (!hotkeys.enabled && activeHotkeyCapture != null) setActiveHotkeyCapture(null);
+  }, [hotkeys.enabled, activeHotkeyCapture]);
+
+  useEffect(() => {
+    if (settingsOpen) return;
+    if (activeHotkeyCapture != null) setActiveHotkeyCapture(null);
+  }, [settingsOpen, activeHotkeyCapture]);
 
   useEffect(() => {
     if (!isValidTimeZone(timezone)) setTimezone(DEFAULT_TZ);
@@ -1821,6 +2143,13 @@ export default function UmaResourceTracker() {
   useEffect(() => {
     if (!settingsOpen) setTzDraft(timezone);
   }, [timezone, settingsOpen]);
+
+  useEffect(() => {
+    if (!hotkeyToast) return;
+    if (typeof window === "undefined") return;
+    const id = window.setTimeout(() => setHotkeyToast(null), 2400);
+    return () => window.clearTimeout(id);
+  }, [hotkeyToast]);
 
   useEffect(() => {
     setAbsGroups((prev) => {
@@ -2094,6 +2423,119 @@ export default function UmaResourceTracker() {
   );
   const rpFull = useMemo(() => timeToFull(curRP, RP_RATE_MS, RP_CAP), [curRP]);
   const tpFull = useMemo(() => timeToFull(curTP, TP_RATE_MS, TP_CAP), [curTP]);
+  const hotkeyBindingsMap = useMemo(() => {
+    const map = new Map<string, HotkeyActionId>();
+    for (const action of HOTKEY_ACTIONS) {
+      const binding = hotkeys.bindings[action.id];
+      if (binding) map.set(binding, action.id);
+    }
+    return map;
+  }, [hotkeys.bindings]);
+  const hotkeyCaptureActive = activeHotkeyCapture != null;
+
+  const updateHotkeys = useCallback(
+    (updater: (prev: HotkeySettings) => HotkeySettings) => {
+      setHotkeys((prev) => {
+        const base = sanitizeHotkeySettings(prev);
+        const next = updater(base);
+        return hotkeySettingsEqual(base, next) ? prev : next;
+      });
+    },
+    [setHotkeys]
+  );
+
+  const toggleHotkeysPause = useCallback(() => {
+    updateHotkeys((prev) => ({ ...prev, paused: !prev.paused }));
+  }, [updateHotkeys]);
+
+  const setHotkeysPaused = useCallback(
+    (paused: boolean) => {
+      updateHotkeys((prev) => ({ ...prev, paused }));
+    },
+    [updateHotkeys]
+  );
+
+  const setHotkeysEnabled = useCallback(
+    (enabled: boolean) => {
+      updateHotkeys((prev) => ({ ...prev, enabled }));
+    },
+    [updateHotkeys]
+  );
+
+  const setHotkeysAllowRepeat = useCallback(
+    (allow: boolean) => {
+      updateHotkeys((prev) => ({ ...prev, allowRepeat: allow }));
+    },
+    [updateHotkeys]
+  );
+
+  const setHotkeyBinding = useCallback(
+    (actionId: HotkeyActionId, binding: string | null) => {
+      updateHotkeys((prev) => {
+        const normalized = binding ? normalizeBindingString(binding) : null;
+        const nextBindings: HotkeyBindings = { ...prev.bindings };
+        if (normalized) {
+          for (const action of HOTKEY_ACTIONS) {
+            if (action.id !== actionId && nextBindings[action.id] === normalized) {
+              nextBindings[action.id] = null;
+            }
+          }
+        }
+        nextBindings[actionId] = normalized;
+        return { ...prev, bindings: nextBindings };
+      });
+    },
+    [updateHotkeys]
+  );
+
+  const clearHotkeyBinding = useCallback(
+    (actionId: HotkeyActionId) => {
+      setHotkeyBinding(actionId, null);
+    },
+    [setHotkeyBinding]
+  );
+
+  const startHotkeyCapture = useCallback((actionId: HotkeyActionId) => {
+    setActiveHotkeyCapture(actionId);
+  }, []);
+
+  const stopHotkeyCapture = useCallback(() => {
+    setActiveHotkeyCapture(null);
+  }, []);
+
+  useEffect(() => {
+    handleHotkeyActionRef.current = (actionId) => {
+      const action = HOTKEY_ACTION_LOOKUP.get(actionId);
+      if (!action) return false;
+      if (action.resource === "tp") {
+        const before = curTP.value;
+        const actual = Math.min(action.amount, Math.max(before, 0));
+        if (actual <= 0) return false;
+        spendTP(actual);
+        const newValue = clamp(before - actual, 0, TP_CAP);
+        setHotkeyToast({
+          id: Date.now(),
+          message: `${action.verb} ${actual} TP (now ${newValue}/${TP_CAP})`,
+        });
+        // TODO: integrate click sound when an audio hook is available.
+        return true;
+      }
+      if (action.resource === "rp") {
+        const before = curRP.value;
+        const actual = Math.min(action.amount, Math.max(before, 0));
+        if (actual <= 0) return false;
+        spendRP(actual);
+        const newValue = clamp(before - actual, 0, RP_CAP);
+        setHotkeyToast({
+          id: Date.now(),
+          message: `${action.verb} ${actual} RP (now ${newValue}/${RP_CAP})`,
+        });
+        // TODO: integrate click sound when an audio hook is available.
+        return true;
+      }
+      return false;
+    };
+  }, [curTP, curRP, spendTP, spendRP, setHotkeyToast]);
 
   function toggleSettings() {
     setSettingsOpen((prev) => {
@@ -2122,6 +2564,7 @@ export default function UmaResourceTracker() {
     setSettingsOpen(false);
     setTzError(null);
     setTzDraft(timezone);
+    setActiveHotkeyCapture(null);
   }
 
   function adjustTP(delta: number) {
@@ -2137,8 +2580,8 @@ export default function UmaResourceTracker() {
   function spendTP(amount: number) {
     adjustTP(-amount);
   }
-  function useOneRP() {
-    adjustRP(-1);
+  function spendRP(amount: number) {
+    adjustRP(-amount);
   }
   function setNextPointOverride(kind: "tp" | "rp", str: string) {
     const ms = parseFlexible(str);
@@ -2309,10 +2752,70 @@ export default function UmaResourceTracker() {
   const q = useQuery();
   const hud = q.get("hud") === "1";
   const overlay = q.get("overlay");
+  const overlayHotkeysParam = q.get("hotkeys") === "1";
+  const overlayHotkeysAllowed = overlay ? overlayHotkeysParam : true;
+  const hotkeysActive = hotkeys.enabled && !hotkeys.paused && overlayHotkeysAllowed && !hotkeyCaptureActive;
   const dailyResetSettings = {
     atReset: notif.dailyReset?.atReset !== false,
     hourBefore: notif.dailyReset?.hourBefore !== false,
   };
+
+  useEffect(() => {
+    if (!hotkeysActive) return;
+    if (typeof window === "undefined") return;
+    const pressed = new Set<string>();
+    const lastTrigger = new Map<HotkeyActionId, number>();
+
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (shouldIgnoreHotkeyEvent(event)) return;
+      const binding = bindingFromEvent(event);
+      if (!binding) return;
+      const actionId = hotkeyBindingsMap.get(binding);
+      if (!actionId) return;
+      if (!hotkeys.allowRepeat && (event.repeat || pressed.has(binding))) return;
+      const nowMs = Date.now();
+      if (hotkeys.allowRepeat) {
+        const prev = lastTrigger.get(actionId) ?? 0;
+        if (nowMs - prev < HOTKEY_THROTTLE_MS) return;
+      }
+      const handled = handleHotkeyActionRef.current(actionId);
+      if (!handled) return;
+      event.preventDefault();
+      event.stopPropagation();
+      pressed.add(binding);
+      lastTrigger.set(actionId, nowMs);
+    };
+
+    const handleKeyup = (event: KeyboardEvent) => {
+      const binding = bindingFromEvent(event);
+      if (!binding) return;
+      pressed.delete(binding);
+    };
+
+    const clearPressed = () => {
+      pressed.clear();
+    };
+
+    const handleVisibilityChange = () => {
+      if (typeof document === "undefined") return;
+      if (document.hidden) pressed.clear();
+    };
+
+    window.addEventListener("keydown", handleKeydown);
+    window.addEventListener("keyup", handleKeyup);
+    window.addEventListener("blur", clearPressed);
+    if (typeof document !== "undefined")
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeydown);
+      window.removeEventListener("keyup", handleKeyup);
+      window.removeEventListener("blur", clearPressed);
+      if (typeof document !== "undefined")
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [hotkeysActive, hotkeys.allowRepeat, hotkeyBindingsMap]);
 
   function copyOverlayURL(kind: string, id = "") {
     if (typeof window === "undefined") return;
@@ -2357,6 +2860,7 @@ export default function UmaResourceTracker() {
           absTimers={absTimers}
           timeZone={activeTimeZone}
         />
+        <HotkeyToast toast={hotkeyToast} />
       </div>
     );
   }
@@ -2368,6 +2872,9 @@ export default function UmaResourceTracker() {
         onOpenSettings={toggleSettings}
         timeZone={activeTimeZone}
         isSettingsOpen={settingsOpen}
+        hotkeysEnabled={hotkeys.enabled}
+        hotkeysPaused={hotkeys.paused}
+        onToggleHotkeysPause={toggleHotkeysPause}
       />
 
       {settingsOpen && (
@@ -2406,6 +2913,87 @@ export default function UmaResourceTracker() {
                 Current local time in {tzDraftTrimmed}: {tzPreview}
               </div>
             )}
+            <div
+              style={{
+                borderTop: `1px solid ${withAlpha(COLOR.border, 0.6)}`,
+                marginTop: 12,
+                paddingTop: 12,
+                display: "grid",
+                gap: 12,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>Hotkeys</div>
+                <div style={{ fontSize: 12, color: COLOR.subtle, marginTop: 4 }}>
+                  Configure keyboard shortcuts for spending TP and RP. Hotkeys are ignored while typing or when
+                  modals are open.
+                </div>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+                <Checkbox
+                  checked={hotkeys.enabled}
+                  onChange={(v) => setHotkeysEnabled(v)}
+                  label="Enable hotkeys"
+                />
+                <Checkbox
+                  checked={hotkeys.paused}
+                  onChange={(v) => setHotkeysPaused(v)}
+                  label="Pause hotkeys"
+                  disabled={!hotkeys.enabled}
+                />
+                <Checkbox
+                  checked={hotkeys.allowRepeat}
+                  onChange={(v) => setHotkeysAllowRepeat(v)}
+                  label="Allow repeat while holding (150ms throttle)"
+                  disabled={!hotkeys.enabled}
+                />
+              </div>
+              <div style={{ display: "grid", gap: 10 }}>
+                {HOTKEY_ACTIONS.map((action) => {
+                  const binding = hotkeys.bindings[action.id];
+                  const capturing = activeHotkeyCapture === action.id;
+                  return (
+                    <div
+                      key={action.id}
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: 12,
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <div style={{ flex: "1 1 220px", minWidth: 200 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{action.label}</div>
+                        <div style={{ fontSize: 12, color: COLOR.subtle, marginTop: 2 }}>
+                          Default: {formatBinding(action.defaultBinding)}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <KeyCapture
+                          binding={binding ?? null}
+                          capturing={capturing}
+                          onStartCapture={() => startHotkeyCapture(action.id)}
+                          onStopCapture={stopHotkeyCapture}
+                          onBindingChange={(value) => setHotkeyBinding(action.id, value)}
+                          disabled={!hotkeys.enabled}
+                        />
+                        <SmallBtn
+                          onClick={() => clearHotkeyBinding(action.id)}
+                          disabled={!hotkeys.enabled || !binding}
+                        >
+                          Clear
+                        </SmallBtn>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 12, color: COLOR.subtle }}>
+                Overlay sources have hotkeys disabled by default. Append <code>?hotkeys=1</code> to an overlay URL to
+                opt in when using OBS.
+              </div>
+            </div>
           </div>
         </Card>
       )}
@@ -2443,7 +3031,7 @@ export default function UmaResourceTracker() {
           onMinus={() => adjustRP(-1)}
           onPlus={() => adjustRP(1)}
           onSpend30={null}
-          onUseOne={() => useOneRP()}
+          onUseOne={() => spendRP(1)}
           milestones={[]}
           milestoneTimes={{}}
           fullInfo={rpFull}
@@ -2602,6 +3190,7 @@ export default function UmaResourceTracker() {
         Streamer HUD: add <code>?hud=1</code> to the URL for compact panels. Overlay links: each card has a "Copy
         Overlay URL" to render a minimal scene for OBS as a browser source. Inputs accept "mm:ss, 10m, 2h, or seconds".
       </footer>
+      <HotkeyToast toast={hotkeyToast} />
     </div>
   );
 }
