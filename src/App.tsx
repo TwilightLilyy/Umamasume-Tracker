@@ -416,6 +416,7 @@ function describeHistoryEvent(
   if (delta > 0) return `Added ${Math.round(delta)} ${resourceLabel} → ${after} • ${time}`;
   if (delta < 0) return `Removed ${Math.round(Math.abs(delta))} ${resourceLabel} → ${after} • ${time}`;
   return `Adjusted ${resourceLabel} → ${after} • ${time}`;
+}
 
 function absTimerCountdownProgress(status: AbsTimerStatus | undefined, remainingMs: number) {
   if (status === "completed" || status === "expired") return 0;
