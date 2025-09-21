@@ -3217,7 +3217,6 @@ export default function UmaResourceTracker() {
     () => nextDailyResetTS(new Date(), activeTimeZone),
     [tick, activeTimeZone]
   );
-  const tzOffset = useMemo(() => getTZOffsetDesignator(activeTimeZone), [activeTimeZone]);
 
   useEffect(() => {
     const ts = now();
