@@ -55,6 +55,7 @@ const HISTORY_SAMPLE_INTERVAL_MS = 60 * 1000;
 const HISTORY_RETENTION_MS = 24 * 60 * 60 * 1000;
 const HISTORY_MIN_POINT_GAP_MS = 15 * 1000;
 const HISTORY_MAX_POINTS = 2000;
+const ABS_TIMER_COUNTDOWN_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 type HotkeyActionId = "tpSpend30" | "tpSpend1" | "rpSpend1" | "rpSpend5";
 
@@ -415,6 +416,12 @@ function describeHistoryEvent(
   if (delta > 0) return `Added ${Math.round(delta)} ${resourceLabel} → ${after} • ${time}`;
   if (delta < 0) return `Removed ${Math.round(Math.abs(delta))} ${resourceLabel} → ${after} • ${time}`;
   return `Adjusted ${resourceLabel} → ${after} • ${time}`;
+
+function absTimerCountdownProgress(status: AbsTimerStatus | undefined, remainingMs: number) {
+  if (status === "completed" || status === "expired") return 0;
+  if (remainingMs <= 0) return 0;
+  if (remainingMs >= ABS_TIMER_COUNTDOWN_WINDOW_MS) return 1;
+  return remainingMs / ABS_TIMER_COUNTDOWN_WINDOW_MS;
 }
 
 export function formatDHMS(ms: number) {
@@ -1794,6 +1801,9 @@ function AbsTimerItem({
     remaining > 0
       ? `Time left: ${formatDHMS(remaining)} (${formatMMSS(remaining)})`
       : `Ended ${formatDHMS(-remaining)} ago`;
+  const countdownProgress = absTimerCountdownProgress(timer.status, remaining);
+  const countdownTrack = withAlpha(mixColor(accent, COLOR.bg, 0.65), 0.5);
+  const countdownFill = mixColor(accent, "#ffffff", 0.15);
   let statusText = "Active";
   let statusColor = mixColor(accent, "#ffffff", 0.2);
   if (timer.status === "completed") {
@@ -1832,6 +1842,27 @@ function AbsTimerItem({
             </div>
             <div style={{ fontSize: 14 }}>{timeLine}</div>
             <div style={{ fontSize: 13, color: statusColor }}>Status: {statusText}</div>
+            <div style={{ display: "grid", gap: 4 }}>
+              <div style={{ fontSize: 11, color: COLOR.subtle }}>30-day countdown</div>
+              <div
+                style={{
+                  height: 6,
+                  background: countdownTrack,
+                  borderRadius: 999,
+                  overflow: "hidden",
+                  boxShadow: `inset 0 0 4px ${withAlpha("#000000", 0.35)}`,
+                }}
+              >
+                <div
+                  style={{
+                    width: `${countdownProgress * 100}%`,
+                    background: countdownFill,
+                    height: "100%",
+                    transition: "width 0.3s ease",
+                  }}
+                />
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -2303,6 +2334,9 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
                 rem > 0
                   ? `Time left: ${formatDHMS(rem)} (${formatMMSS(rem)})`
                   : `Ended ${formatDHMS(-rem)} ago`;
+              const countdownProgress = absTimerCountdownProgress(a.status, rem);
+              const countdownTrack = withAlpha(mixColor(accent, COLOR.bg, 0.65), 0.5);
+              const countdownFill = mixColor(accent, "#ffffff", 0.15);
               const statusText =
                 a.status === "completed"
                   ? "Completed"
@@ -2328,6 +2362,27 @@ function TimerOverviewList({ timers, absTimers, timeZone }: TimerOverviewListPro
                     </div>
                     <div style={{ fontSize: 12, color: timelineColor }}>{timeLine}</div>
                     <div style={{ fontSize: 12, color: statusColor }}>Status: {statusText}</div>
+                    <div style={{ display: "grid", gap: 4 }}>
+                      <div style={{ fontSize: 11, color: COLOR.subtle }}>30-day countdown</div>
+                      <div
+                        style={{
+                          height: 6,
+                          background: countdownTrack,
+                          borderRadius: 999,
+                          overflow: "hidden",
+                          boxShadow: `inset 0 0 4px ${withAlpha("#000000", 0.35)}`,
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: `${countdownProgress * 100}%`,
+                            background: countdownFill,
+                            height: "100%",
+                            transition: "width 0.3s ease",
+                          }}
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
               );
