@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  createEmptyHistoryState,
+  type ResourceHistoryEventInput,
+  type ResourceHistoryEvent,
+  type ResourceHistoryPoint,
+  type ResourceHistorySnapshot,
+  type ResourceHistoryState,
+  type ResourceKind,
+} from "./types/history";
+
 const DEFAULT_TZ = "America/Chicago";
 
 function isValidTimeZone(value: string) {
@@ -41,6 +51,10 @@ const TIMER_COLORS = [
 ];
 
 const HOTKEY_THROTTLE_MS = 150;
+const HISTORY_SAMPLE_INTERVAL_MS = 60 * 1000;
+const HISTORY_RETENTION_MS = 24 * 60 * 60 * 1000;
+const HISTORY_MIN_POINT_GAP_MS = 15 * 1000;
+const HISTORY_MAX_POINTS = 2000;
 
 type HotkeyActionId = "tpSpend30" | "tpSpend1" | "rpSpend1" | "rpSpend5";
 
@@ -276,6 +290,132 @@ function withAlpha(hex: string, alpha: number) {
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${a})`;
 }
 const now = () => Date.now();
+
+function sanitizeHistorySnapshot(
+  snapshot: Partial<ResourceHistorySnapshot> | undefined,
+  kind: ResourceKind
+): ResourceHistorySnapshot {
+  const points: ResourceHistoryPoint[] = [];
+  if (snapshot && Array.isArray(snapshot.points)) {
+    for (const point of snapshot.points) {
+      const ts = Number(point?.ts);
+      const value = Number(point?.value);
+      if (!Number.isFinite(ts) || !Number.isFinite(value)) continue;
+      points.push({ ts, value });
+    }
+    points.sort((a, b) => a.ts - b.ts);
+    if (points.length > HISTORY_MAX_POINTS) points.splice(0, points.length - HISTORY_MAX_POINTS);
+  }
+
+  const events: ResourceHistoryEvent[] = [];
+  if (snapshot && Array.isArray(snapshot.events)) {
+    for (const event of snapshot.events) {
+      const ts = Number(event?.ts);
+      const value = Number(event?.value);
+      if (!Number.isFinite(ts) || !Number.isFinite(value)) continue;
+      const deltaRaw = Number(event?.delta);
+      const delta = Number.isFinite(deltaRaw) ? deltaRaw : undefined;
+      const note = typeof event?.note === "string" && event.note.trim().length > 0 ? event.note.trim() : undefined;
+      const type: ResourceHistoryEvent["type"] =
+        event?.type === "spend" || event?.type === "manual" || event?.type === "reset"
+          ? event.type
+          : "manual";
+      const id = typeof event?.id === "string" && event.id ? event.id : crypto.randomUUID();
+      events.push({ id, ts, kind, type, value, delta, note });
+    }
+    events.sort((a, b) => a.ts - b.ts);
+    if (events.length > HISTORY_MAX_POINTS) events.splice(0, events.length - HISTORY_MAX_POINTS);
+  }
+
+  return { points, events };
+}
+
+function sanitizeHistoryState(state: Partial<ResourceHistoryState> | undefined): ResourceHistoryState {
+  if (!state || typeof state !== "object") return createEmptyHistoryState();
+  const base = state as ResourceHistoryState;
+  return {
+    tp: sanitizeHistorySnapshot(base.tp, "tp"),
+    rp: sanitizeHistorySnapshot(base.rp, "rp"),
+  };
+}
+
+function cloneHistoryState(state: ResourceHistoryState): ResourceHistoryState {
+  return {
+    tp: { points: [...state.tp.points], events: [...state.tp.events] },
+    rp: { points: [...state.rp.points], events: [...state.rp.events] },
+  };
+}
+
+function trimHistorySnapshot(snapshot: ResourceHistorySnapshot, cutoff: number): ResourceHistorySnapshot {
+  const points = snapshot.points.filter((p) => p.ts >= cutoff);
+  const events = snapshot.events.filter((e) => e.ts >= cutoff);
+  return { points, events };
+}
+
+function trimHistoryInPlace(snapshot: ResourceHistorySnapshot, cutoff: number) {
+  const trimmed = trimHistorySnapshot(snapshot, cutoff);
+  snapshot.points = trimmed.points;
+  snapshot.events = trimmed.events;
+}
+
+function pushHistoryPoint(
+  snapshot: ResourceHistorySnapshot,
+  value: number,
+  timestamp: number,
+  force = false
+) {
+  const last = snapshot.points[snapshot.points.length - 1];
+  if (last) {
+    if (!force && Math.abs(last.value - value) < 0.01 && timestamp - last.ts < HISTORY_MIN_POINT_GAP_MS)
+      return false;
+  }
+  snapshot.points.push({ ts: timestamp, value });
+  if (snapshot.points.length > HISTORY_MAX_POINTS)
+    snapshot.points.splice(0, snapshot.points.length - HISTORY_MAX_POINTS);
+  return true;
+}
+
+function addHistoryEventToSnapshot(
+  snapshot: ResourceHistorySnapshot,
+  kind: ResourceKind,
+  value: number,
+  timestamp: number,
+  event: ResourceHistoryEventInput
+) {
+  const entry: ResourceHistoryEvent = {
+    id: crypto.randomUUID(),
+    ts: timestamp,
+    kind,
+    type: event.type,
+    value,
+    delta: event.delta,
+    note: event.note,
+  };
+  snapshot.events.push(entry);
+  if (snapshot.events.length > HISTORY_MAX_POINTS)
+    snapshot.events.splice(0, snapshot.events.length - HISTORY_MAX_POINTS);
+  return true;
+}
+
+function describeHistoryEvent(
+  event: ResourceHistoryEvent,
+  resourceLabel: string,
+  timeZone: string
+): string {
+  const time = new Date(event.ts).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" });
+  const after = Math.round(event.value);
+  const delta = event.delta ?? 0;
+  if (event.note) return `${event.note} → ${after} • ${time}`;
+  if (event.type === "reset") return `Daily reset → ${after} • ${time}`;
+  if (event.type === "spend") {
+    const amount = Math.round(Math.abs(delta));
+    if (amount > 0) return `Spent ${amount} ${resourceLabel} → ${after} • ${time}`;
+    return `Spent ${resourceLabel} → ${after} • ${time}`;
+  }
+  if (delta > 0) return `Added ${Math.round(delta)} ${resourceLabel} → ${after} • ${time}`;
+  if (delta < 0) return `Removed ${Math.round(Math.abs(delta))} ${resourceLabel} → ${after} • ${time}`;
+  return `Adjusted ${resourceLabel} → ${after} • ${time}`;
+}
 
 export function formatDHMS(ms: number) {
   if (!Number.isFinite(ms)) ms = 0;
@@ -750,6 +890,103 @@ function ProgressBar({ value, max, color }: ProgressBarProps) {
   );
 }
 
+interface SparklineProps {
+  points: ResourceHistoryPoint[];
+  events: ResourceHistoryEvent[];
+  color: string;
+  cap: number;
+  currentValue: number;
+  retentionMs: number;
+  resourceLabel: string;
+  timeZone: string;
+  height?: number;
+}
+
+function Sparkline({
+  points,
+  events,
+  color,
+  cap,
+  currentValue,
+  retentionMs,
+  resourceLabel,
+  timeZone,
+  height = 40,
+}: SparklineProps) {
+  const width = 100;
+  const nowMs = now();
+  const domainStart = nowMs - retentionMs;
+  const domainEnd = nowMs;
+  const span = Math.max(domainEnd - domainStart, 1);
+
+  const filtered = points.filter((p) => p.ts >= domainStart);
+  const series: ResourceHistoryPoint[] = filtered.length ? [...filtered] : [];
+  if (!series.length) {
+    series.push({ ts: domainStart, value: currentValue });
+  }
+  if (series[0].ts > domainStart) {
+    series.unshift({ ts: domainStart, value: series[0].value });
+  }
+  const latestValue = currentValue;
+  const lastSeriesPoint = series[series.length - 1];
+  if (!lastSeriesPoint || domainEnd - lastSeriesPoint.ts > 0) {
+    const value = lastSeriesPoint ? lastSeriesPoint.value : latestValue;
+    const finalValue = Math.abs(value - latestValue) > 0.01 ? latestValue : value;
+    series.push({ ts: domainEnd, value: finalValue });
+  }
+  if (series.length === 1) {
+    series.push({ ts: domainEnd, value: series[0].value });
+  }
+
+  const coords = series.map((p) => {
+    const x = ((p.ts - domainStart) / span) * width;
+    const ratio = cap > 0 ? clamp(p.value / cap, 0, 1) : 0;
+    const y = height - ratio * height;
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  });
+
+  if (!coords.length) coords.push(`0,${height}`, `${width},${height}`);
+
+  const areaPath = `M0,${height} L${coords.join(" L ")} L${width},${height} Z`;
+  const linePath = `M${coords.join(" L ")}`;
+
+  const markerEvents = events.filter((event) => event.ts >= domainStart && event.ts <= domainEnd + 1000);
+
+  return (
+    <div style={{ width: "100%", height }}>
+      <svg
+        width="100%"
+        height="100%"
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={`${resourceLabel} history sparkline`}
+      >
+        <path d={areaPath} fill={withAlpha(mixColor(color, COLOR.bg, 0.35), 0.25)} stroke="none" />
+        <path d={linePath} fill="none" stroke={color} strokeWidth={1.6} strokeLinecap="round" />
+        {markerEvents.map((event) => {
+          const x = ((event.ts - domainStart) / span) * width;
+          const ratio = cap > 0 ? clamp(event.value / cap, 0, 1) : 0;
+          const y = height - ratio * height;
+          return (
+            <circle
+              key={event.id}
+              cx={x}
+              cy={y}
+              r={1.9}
+              fill={mixColor(color, "#ffffff", 0.15)}
+              stroke={mixColor(color, "#000000", 0.35)}
+              strokeWidth={0.5}
+            >
+              <title>{describeHistoryEvent(event, resourceLabel, timeZone)}</title>
+            </circle>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 interface SmallBtnProps {
   onClick: () => void;
   children: React.ReactNode;
@@ -1006,8 +1243,6 @@ interface ResourceCardProps {
   name: string;
   cap: number;
   rateMs: number;
-  state: ResourceState;
-  setState: SetState<ResourceState>;
   current: CurrentResource;
   onMinus: () => void;
   onPlus: () => void;
@@ -1020,6 +1255,9 @@ interface ResourceCardProps {
   hud: boolean;
   onCopyOverlay: () => void;
   timeZone: string;
+  onSetAmount: (value: number) => void;
+  history: ResourceHistorySnapshot;
+  historyRetentionMs: number;
 }
 
 function ResourceCard({
@@ -1027,8 +1265,6 @@ function ResourceCard({
   name,
   cap,
   rateMs,
-  state,
-  setState,
   current,
   onMinus,
   onPlus,
@@ -1041,12 +1277,18 @@ function ResourceCard({
   hud,
   onCopyOverlay,
   timeZone,
+  onSetAmount,
+  history,
+  historyRetentionMs,
 }: ResourceCardProps) {
   const [nextInput, setNextInput] = useState("");
   const [amountInput, setAmountInput] = useState("");
   const timeToNext = current.nextPoint - now();
   const place = "mm:ss, 10m, 2h, or seconds";
   const zone = ensureTimeZone(timeZone);
+  const historyWindowLabel = `${Math.round(historyRetentionMs / 3600000)}h`;
+  const recentEvents = history.events.slice(-3).reverse();
+  const sparklineHeight = hud ? 28 : 44;
 
   const bigValStyle: React.CSSProperties = {
     fontWeight: 800,
@@ -1075,6 +1317,40 @@ function ResourceCard({
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
         <div style={bigValStyle}>{current.value}</div>
         <ProgressBar value={current.value} max={cap} color={accent} />
+      </div>
+
+      <div style={{ marginTop: 6 }}>
+        <Sparkline
+          points={history.points}
+          events={history.events}
+          color={accent}
+          cap={cap}
+          currentValue={current.value}
+          retentionMs={historyRetentionMs}
+          resourceLabel={name}
+          timeZone={zone}
+          height={sparklineHeight}
+        />
+        <div style={{ fontSize: 11, color: COLOR.subtle, marginTop: 4 }}>
+          History ({historyWindowLabel}) — hover markers for spends & resets
+        </div>
+        {recentEvents.length > 0 && (
+          <ul
+            style={{
+              marginTop: 4,
+              padding: 0,
+              listStyle: "none",
+              display: "grid",
+              gap: 2,
+              fontSize: 12,
+              color: COLOR.subtle,
+            }}
+          >
+            {recentEvents.map((event) => (
+              <li key={event.id}>{describeHistoryEvent(event, name, zone)}</li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {hud ? (
@@ -1155,12 +1431,7 @@ function ResourceCard({
               <SmallBtn
                 onClick={() => {
                   const n = parseInt(amountInput, 10);
-                  if (!Number.isNaN(n))
-                    setState((prev) => ({
-                      base: clamp(n, 0, cap),
-                      last: now(),
-                      nextOverride: prev.nextOverride ?? null,
-                    }));
+                  if (!Number.isNaN(n)) onSetAmount(n);
                   setAmountInput("");
                 }}
               >
@@ -2346,9 +2617,25 @@ interface OverlayViewProps {
   timers: TimerData[];
   absTimers: AbsTimer[];
   timeZone: string;
+  tpHistory: ResourceHistorySnapshot;
+  rpHistory: ResourceHistorySnapshot;
+  historyRetentionMs: number;
 }
 
-function OverlayView({ overlay, curTP, curRP, tpFull, rpFull, nextReset, timers, absTimers, timeZone }: OverlayViewProps) {
+function OverlayView({
+  overlay,
+  curTP,
+  curRP,
+  tpFull,
+  rpFull,
+  nextReset,
+  timers,
+  absTimers,
+  timeZone,
+  tpHistory,
+  rpHistory,
+  historyRetentionMs,
+}: OverlayViewProps) {
   const [, setTick] = useState(0);
   useEffect(() => {
     const id = window.setInterval(() => setTick((t) => t + 1), 1000);
@@ -2369,6 +2656,19 @@ function OverlayView({ overlay, curTP, curRP, tpFull, rpFull, nextReset, timers,
         <div style={sub}>
           Next: {formatMMSS(curTP.nextPoint - now())} • Full: {formatDHMS(tpFull.ms)}
         </div>
+        <div style={{ marginTop: 8 }}>
+          <Sparkline
+            points={tpHistory.points}
+            events={tpHistory.events}
+            color={COLOR.tp}
+            cap={TP_CAP}
+            currentValue={curTP.value}
+            retentionMs={historyRetentionMs}
+            resourceLabel="TP"
+            timeZone={zone}
+            height={32}
+          />
+        </div>
       </div>
     );
   if (overlay === "rp")
@@ -2377,6 +2677,19 @@ function OverlayView({ overlay, curTP, curRP, tpFull, rpFull, nextReset, timers,
         <div style={{ ...slab, color: COLOR.rp }}>RP: {curRP.value}</div>
         <div style={sub}>
           Next: {formatMMSS(curRP.nextPoint - now())} • Full: {formatDHMS(rpFull.ms)}
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <Sparkline
+            points={rpHistory.points}
+            events={rpHistory.events}
+            color={COLOR.rp}
+            cap={RP_CAP}
+            currentValue={curRP.value}
+            retentionMs={historyRetentionMs}
+            resourceLabel="RP"
+            timeZone={zone}
+            height={32}
+          />
         </div>
       </div>
     );
@@ -2511,6 +2824,10 @@ export default function UmaResourceTracker() {
     last: now(),
     nextOverride: null,
   });
+  const [historyRaw, setHistoryState] = useLocalStorage<ResourceHistoryState>(
+    "uma.history",
+    createEmptyHistoryState()
+  );
   const [notif, setNotif] = useLocalStorage<NotificationState>("uma.notif", {
     enabled: false,
     tpMilestones: { "30": true, "60": true, "90": true, full: true },
@@ -2538,6 +2855,8 @@ export default function UmaResourceTracker() {
   const [hotkeyToast, setHotkeyToast] = useState<HotkeyToastState | null>(null);
   const [activeHotkeyCapture, setActiveHotkeyCapture] = useState<HotkeyActionId | null>(null);
   const handleHotkeyActionRef = useRef<(id: HotkeyActionId) => boolean>(() => false);
+  const lastHistorySampleRef = useRef<{ tp: number; rp: number }>({ tp: 0, rp: 0 });
+  const lastResetTsRef = useRef<number | null>(null);
 
   const activeTimeZone = ensureTimeZone(timezone);
 
@@ -2614,6 +2933,60 @@ export default function UmaResourceTracker() {
       }),
     [rpRaw]
   );
+  const history = useMemo(() => sanitizeHistoryState(historyRaw), [historyRaw]);
+
+  const updateHistory = useCallback(
+    (mutator: (draft: ResourceHistoryState, timestamp: number) => boolean, timestamp?: number) => {
+      const ts = timestamp ?? now();
+      setHistoryState((prev) => {
+        const base = sanitizeHistoryState(prev);
+        const draft = cloneHistoryState(base);
+        const changed = mutator(draft, ts);
+        if (!changed) return prev;
+        trimHistoryInPlace(draft.tp, ts - HISTORY_RETENTION_MS);
+        trimHistoryInPlace(draft.rp, ts - HISTORY_RETENTION_MS);
+        return draft;
+      });
+    },
+    [setHistoryState]
+  );
+
+  const sampleHistoryPoint = useCallback(
+    (kind: ResourceKind, value: number, timestamp: number, force = false) => {
+      let changed = false;
+      updateHistory((draft, ts) => {
+        const snapshot = kind === "tp" ? draft.tp : draft.rp;
+        const lastSample = lastHistorySampleRef.current[kind];
+        if (!force && lastSample && ts - lastSample < HISTORY_SAMPLE_INTERVAL_MS && snapshot.points.length > 0)
+          return false;
+        changed = pushHistoryPoint(snapshot, value, ts, force || snapshot.points.length === 0);
+        return changed;
+      }, timestamp);
+      if (changed) lastHistorySampleRef.current[kind] = timestamp;
+    },
+    [updateHistory]
+  );
+
+  const recordHistoryEvent = useCallback(
+    (kind: ResourceKind, value: number, input: ResourceHistoryEventInput, timestamp?: number) => {
+      const ts = timestamp ?? now();
+      updateHistory((draft, tsNow) => {
+        const snapshot = kind === "tp" ? draft.tp : draft.rp;
+        pushHistoryPoint(snapshot, value, tsNow, true);
+        addHistoryEventToSnapshot(snapshot, kind, value, tsNow, input);
+        return true;
+      }, ts);
+      lastHistorySampleRef.current[kind] = ts;
+    },
+    [updateHistory]
+  );
+
+  useEffect(() => {
+    if (history.tp.points.length)
+      lastHistorySampleRef.current.tp = history.tp.points[history.tp.points.length - 1].ts;
+    if (history.rp.points.length)
+      lastHistorySampleRef.current.rp = history.rp.points[history.rp.points.length - 1].ts;
+  }, [history.tp.points, history.rp.points]);
 
   const fallbackGroupId = useMemo(
     () => findFallbackGroupId(absGroups.length ? absGroups : DEFAULT_ABS_TIMER_GROUPS),
@@ -2769,6 +3142,22 @@ export default function UmaResourceTracker() {
     [tick, activeTimeZone]
   );
   const tzOffset = useMemo(() => getTZOffsetDesignator(activeTimeZone), [activeTimeZone]);
+
+  useEffect(() => {
+    const ts = now();
+    sampleHistoryPoint("tp", curTP.value, ts);
+    sampleHistoryPoint("rp", curRP.value, ts);
+  }, [tick, curTP.value, curRP.value, sampleHistoryPoint]);
+
+  useEffect(() => {
+    const previous = lastResetTsRef.current;
+    const nowTs = now();
+    if (previous != null && previous !== nextReset && previous <= nowTs) {
+      recordHistoryEvent("tp", curTP.value, { type: "reset", note: "Daily reset", force: true }, nowTs);
+      recordHistoryEvent("rp", curRP.value, { type: "reset", note: "Daily reset", force: true }, nowTs);
+    }
+    lastResetTsRef.current = nextReset;
+  }, [nextReset, curTP.value, curRP.value, recordHistoryEvent]);
 
   const [anchoredInit, setAnchoredInit] = useState(false);
   useEffect(() => {
@@ -2999,21 +3388,71 @@ export default function UmaResourceTracker() {
     setActiveHotkeyCapture(null);
   }
 
+  function applyTPUpdate(
+    targetValue: number,
+    current: CurrentResource,
+    nowMs: number,
+    type: ResourceHistoryEventInput["type"],
+    note?: string,
+    force = false
+  ) {
+    const clamped = clamp(Math.round(targetValue), 0, TP_CAP);
+    const delta = clamped - current.value;
+    if (!force && delta === 0) return;
+    setTP((prev) => ({ base: clamped, last: nowMs, nextOverride: prev.nextOverride ?? current.nextPoint }));
+    recordHistoryEvent("tp", clamped, { type, delta, note, force }, nowMs);
+  }
+
+  function applyRPUpdate(
+    targetValue: number,
+    current: CurrentResource,
+    nowMs: number,
+    type: ResourceHistoryEventInput["type"],
+    note?: string,
+    force = false
+  ) {
+    const clamped = clamp(Math.round(targetValue), 0, RP_CAP);
+    const delta = clamped - current.value;
+    if (!force && delta === 0) return;
+    setRP((prev) => ({ base: clamped, last: nowMs, nextOverride: prev.nextOverride ?? current.nextPoint }));
+    recordHistoryEvent("rp", clamped, { type, delta, note, force }, nowMs);
+  }
+
+  function changeTP(delta: number, type: ResourceHistoryEventInput["type"], note?: string, force = false) {
+    const nowMs = now();
+    const current = computeCurrent(tp.base, tp.last, TP_RATE_MS, TP_CAP, tp.nextOverride, nowMs);
+    applyTPUpdate(current.value + delta, current, nowMs, type, note, force);
+  }
+
+  function changeRP(delta: number, type: ResourceHistoryEventInput["type"], note?: string, force = false) {
+    const nowMs = now();
+    const current = computeCurrent(rp.base, rp.last, RP_RATE_MS, RP_CAP, rp.nextOverride, nowMs);
+    applyRPUpdate(current.value + delta, current, nowMs, type, note, force);
+  }
+
+  function setTPAmount(value: number, type: ResourceHistoryEventInput["type"] = "manual", note?: string, force = false) {
+    const nowMs = now();
+    const current = computeCurrent(tp.base, tp.last, TP_RATE_MS, TP_CAP, tp.nextOverride, nowMs);
+    applyTPUpdate(value, current, nowMs, type, note, force);
+  }
+
+  function setRPAmount(value: number, type: ResourceHistoryEventInput["type"] = "manual", note?: string, force = false) {
+    const nowMs = now();
+    const current = computeCurrent(rp.base, rp.last, RP_RATE_MS, RP_CAP, rp.nextOverride, nowMs);
+    applyRPUpdate(value, current, nowMs, type, note, force);
+  }
+
   function adjustTP(delta: number) {
-    const current = computeCurrent(tp.base, tp.last, TP_RATE_MS, TP_CAP, tp.nextOverride, now());
-    const newVal = clamp(current.value + delta, 0, TP_CAP);
-    setTP((prev) => ({ base: newVal, last: now(), nextOverride: prev.nextOverride ?? current.nextPoint }));
+    changeTP(delta, "manual");
   }
   function adjustRP(delta: number) {
-    const current = computeCurrent(rp.base, rp.last, RP_RATE_MS, RP_CAP, rp.nextOverride, now());
-    const newVal = clamp(current.value + delta, 0, RP_CAP);
-    setRP((prev) => ({ base: newVal, last: now(), nextOverride: prev.nextOverride ?? current.nextPoint }));
+    changeRP(delta, "manual");
   }
   function spendTP(amount: number) {
-    adjustTP(-amount);
+    changeTP(-amount, "spend");
   }
   function spendRP(amount: number) {
-    adjustRP(-amount);
+    changeRP(-amount, "spend");
   }
   function setNextPointOverride(kind: "tp" | "rp", str: string) {
     const ms = parseFlexible(str);
@@ -3352,6 +3791,9 @@ export default function UmaResourceTracker() {
           timers={timers}
           absTimers={absTimers}
           timeZone={activeTimeZone}
+          tpHistory={history.tp}
+          rpHistory={history.rp}
+          historyRetentionMs={HISTORY_RETENTION_MS}
         />
         <HotkeyToast toast={hotkeyToast} />
       </div>
@@ -3497,8 +3939,6 @@ export default function UmaResourceTracker() {
           name="TP"
           cap={TP_CAP}
           rateMs={TP_RATE_MS}
-          state={tp}
-          setState={setTP}
           current={curTP}
           onMinus={() => adjustTP(-1)}
           onPlus={() => adjustTP(1)}
@@ -3511,6 +3951,9 @@ export default function UmaResourceTracker() {
           hud={hud}
           onCopyOverlay={() => copyOverlayURL("tp")}
           timeZone={activeTimeZone}
+          onSetAmount={(value) => setTPAmount(value)}
+          history={history.tp}
+          historyRetentionMs={HISTORY_RETENTION_MS}
         />
 
         <ResourceCard
@@ -3518,8 +3961,6 @@ export default function UmaResourceTracker() {
           name="RP"
           cap={RP_CAP}
           rateMs={RP_RATE_MS}
-          state={rp}
-          setState={setRP}
           current={curRP}
           onMinus={() => adjustRP(-1)}
           onPlus={() => adjustRP(1)}
@@ -3532,6 +3973,9 @@ export default function UmaResourceTracker() {
           hud={hud}
           onCopyOverlay={() => copyOverlayURL("rp")}
           timeZone={activeTimeZone}
+          onSetAmount={(value) => setRPAmount(value)}
+          history={history.rp}
+          historyRetentionMs={HISTORY_RETENTION_MS}
         />
       </div>
 
