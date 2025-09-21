@@ -603,10 +603,7 @@ function Header({
     >
       <div>
         <div style={{ fontSize: hud ? 20 : 24, fontWeight: 700 }}>
-          Uma RP/TP Tracker — Streamer Build2
-        </div>
-        <div style={{ color: COLOR.subtle, fontSize: 12 }}>
-          Dark theme • TP gold • RP blue • HUD mode & overlay URLs
+          Uma RP/TP Tracker — Release Candidate
         </div>
         <div style={{ color: COLOR.subtle, fontSize: 12, marginTop: 4 }}>
           Current time zone: {zone}
