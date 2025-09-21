@@ -832,16 +832,17 @@ interface SelectProps {
 function Select({ value, onChange, children }: SelectProps) {
   const optionBackground = mixColor(COLOR.card, "#000000", 0.35);
   const styledChildren = React.Children.map(children, (child) => {
-    if (React.isValidElement(child) && child.type === "option") {
-      return React.cloneElement(child, {
-        style: {
-          backgroundColor: optionBackground,
-          color: COLOR.text,
-          ...(child.props.style ?? {}),
-        },
-      });
-    }
-    return child;
+    if (!React.isValidElement(child) || child.type !== "option") return child;
+    const optionChild = child as React.ReactElement<
+      React.OptionHTMLAttributes<HTMLOptionElement>
+    >;
+    return React.cloneElement(optionChild, {
+      style: {
+        backgroundColor: optionBackground,
+        color: COLOR.text,
+        ...(optionChild.props.style ?? {}),
+      },
+    });
   });
 
   return (
@@ -1014,7 +1015,6 @@ interface ResourceCardProps {
   name: string;
   cap: number;
   rateMs: number;
-  state: ResourceState;
   setState: SetState<ResourceState>;
   current: CurrentResource;
   onMinus: () => void;
@@ -1035,7 +1035,6 @@ function ResourceCard({
   name,
   cap,
   rateMs,
-  state,
   setState,
   current,
   onMinus,
@@ -3553,7 +3552,6 @@ export default function UmaResourceTracker() {
           name="TP"
           cap={TP_CAP}
           rateMs={TP_RATE_MS}
-          state={tp}
           setState={setTP}
           current={curTP}
           onMinus={() => adjustTP(-1)}
@@ -3574,7 +3572,6 @@ export default function UmaResourceTracker() {
           name="RP"
           cap={RP_CAP}
           rateMs={RP_RATE_MS}
-          state={rp}
           setState={setRP}
           current={curRP}
           onMinus={() => adjustRP(-1)}
@@ -3591,7 +3588,7 @@ export default function UmaResourceTracker() {
         />
       </div>
 
-      <Card title="Daily Reset & Timer Overview">
+      <Card title={`${resetTitle} & Timer Overview`}>
         <CountdownRow targetMs={nextReset} timeZone={activeTimeZone} />
         <div style={{ marginTop: 12 }}>
           <TimerOverviewList
