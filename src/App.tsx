@@ -1085,12 +1085,16 @@ interface SelectProps {
 function Select({ value, onChange, children }: SelectProps) {
   const optionBackground = mixColor(COLOR.card, "#000000", 0.35);
   const styledChildren = React.Children.map(children, (child) => {
-    if (React.isValidElement(child) && child.type === "option") {
+    if (
+      React.isValidElement<React.OptionHTMLAttributes<HTMLOptionElement>>(child) &&
+      child.type === "option"
+    ) {
+      const existingStyle = child.props.style ?? {};
       return React.cloneElement(child, {
         style: {
           backgroundColor: optionBackground,
           color: COLOR.text,
-          ...(child.props.style ?? {}),
+          ...existingStyle,
         },
       });
     }
@@ -3848,8 +3852,6 @@ export default function UmaResourceTracker() {
   const tzPreview = settingsOpen && tzDraftIsValid
     ? new Date().toLocaleString(undefined, { timeZone: tzDraftTrimmed })
     : null;
-  const resetTitle = `Daily Reset (10:00 AM ${activeTimeZone} • UTC${tzOffset})`;
-
   if (overlay) {
     return (
       <div style={{ padding: 16, fontFamily: "Inter, ui-sans-serif, system-ui", color: COLOR.text }}>
