@@ -406,15 +406,31 @@ function describeHistoryEvent(
   const time = new Date(event.ts).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" });
   const after = Math.round(event.value);
   const delta = event.delta ?? 0;
-  if (event.note) return `${event.note} → ${after} • ${time}`;
-  if (event.type === "reset") return `Daily reset → ${after} • ${time}`;
-  if (event.type === "spend") {
-    const amount = Math.round(Math.abs(delta));
-    if (amount > 0) return `Spent ${amount} ${resourceLabel} → ${after} • ${time}`;
-    return `Spent ${resourceLabel} → ${after} • ${time}`;
+
+  if (event.note) {
+    return `${event.note} → ${after} • ${time}`;
   }
-  if (delta > 0) return `Added ${Math.round(delta)} ${resourceLabel} → ${after} • ${time}`;
-  if (delta < 0) return `Removed ${Math.round(Math.abs(delta))} ${resourceLabel} → ${after} • ${time}`;
+
+  switch (event.type) {
+    case "reset":
+      return `Daily reset → ${after} • ${time}`;
+    case "spend": {
+      const amount = Math.round(Math.abs(delta));
+      if (amount > 0) {
+        return `Spent ${amount} ${resourceLabel} → ${after} • ${time}`;
+      }
+      return `Spent ${resourceLabel} → ${after} • ${time}`;
+    }
+    default:
+      break;
+  }
+
+  if (delta > 0) {
+    return `Added ${Math.round(delta)} ${resourceLabel} → ${after} • ${time}`;
+  }
+  if (delta < 0) {
+    return `Removed ${Math.round(Math.abs(delta))} ${resourceLabel} → ${after} • ${time}`;
+  }
   return `Adjusted ${resourceLabel} → ${after} • ${time}`;
 }
 
