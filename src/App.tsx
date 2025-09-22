@@ -347,6 +347,38 @@ function cloneHistoryState(state: ResourceHistoryState): ResourceHistoryState {
   };
 }
 
+interface WastedResetState {
+  tp: number | null;
+  rp: number | null;
+}
+
+function sanitizeWastedResetState(state: Partial<WastedResetState> | undefined): WastedResetState {
+  const normalize = (value: unknown) => {
+    if (value == null) return null;
+    const num = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
+  if (!state || typeof state !== "object") return { tp: null, rp: null };
+  const base = state as WastedResetState;
+  return {
+    tp: normalize(base.tp),
+    rp: normalize(base.rp),
+  };
+}
+
+function wastedResetStateEqual(
+  a: Partial<WastedResetState> | undefined,
+  b: Partial<WastedResetState> | undefined
+) {
+  const normalize = (value: unknown) => {
+    if (value == null) return null;
+    const num = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
+  return (normalize(a?.tp) ?? null) === (normalize(b?.tp) ?? null) &&
+    (normalize(a?.rp) ?? null) === (normalize(b?.rp) ?? null);
+}
+
 function trimHistorySnapshot(snapshot: ResourceHistorySnapshot, cutoff: number): ResourceHistorySnapshot {
   const points = snapshot.points.filter((p) => p.ts >= cutoff);
   const events = snapshot.events.filter((e) => e.ts >= cutoff);
@@ -1013,11 +1045,17 @@ function computeWastedAtCap(
   cap: number,
   rateMs: number,
   retentionMs: number,
-  nowMs: number
+  nowMs: number,
+  resetStartMs?: number | null
 ): WastedInfo {
   if (!(cap > 0) || !(rateMs > 0)) return { ms: 0, points: 0 };
-  const domainStart = nowMs - retentionMs;
+  let domainStart = nowMs - retentionMs;
+  if (Number.isFinite(resetStartMs)) {
+    const resetClamped = Math.min(resetStartMs as number, nowMs);
+    domainStart = Math.max(domainStart, resetClamped);
+  }
   const domainEnd = nowMs;
+  if (domainStart > domainEnd) return { ms: 0, points: 0 };
   const series = buildHistorySeries(points, currentValue, domainStart, domainEnd);
   let wastedMs = 0;
   for (let i = 0; i < series.length - 1; i++) {
@@ -2949,6 +2987,10 @@ export default function UmaResourceTracker() {
     "uma.history",
     createEmptyHistoryState()
   );
+  const [wastedResetRaw, setWastedResetState] = useLocalStorage<WastedResetState>("uma.wastedReset", {
+    tp: null,
+    rp: null,
+  });
   const [notif, setNotif] = useLocalStorage<NotificationState>("uma.notif", {
     enabled: false,
     tpMilestones: { "30": true, "60": true, "90": true, full: true },
@@ -3055,6 +3097,12 @@ export default function UmaResourceTracker() {
     [rpRaw]
   );
   const history = useMemo(() => sanitizeHistoryState(historyRaw), [historyRaw]);
+  const wastedReset = useMemo(() => sanitizeWastedResetState(wastedResetRaw), [wastedResetRaw]);
+
+  useEffect(() => {
+    const sanitized = sanitizeWastedResetState(wastedResetRaw);
+    if (!wastedResetStateEqual(wastedResetRaw, sanitized)) setWastedResetState(sanitized);
+  }, [wastedResetRaw, setWastedResetState]);
 
   const updateHistory = useCallback(
     (mutator: (draft: ResourceHistoryState, timestamp: number) => boolean, timestamp?: number) => {
@@ -3366,12 +3414,34 @@ export default function UmaResourceTracker() {
   const tpFull = useMemo(() => timeToFull(curTP, TP_RATE_MS, TP_CAP), [curTP]);
   const tpWasted = useMemo(() => {
     const nowTs = now();
-    return computeWastedAtCap(history.tp.points, curTP.value, TP_CAP, TP_RATE_MS, HISTORY_RETENTION_MS, nowTs);
-  }, [history.tp.points, curTP.value, tick]);
+    return computeWastedAtCap(
+      history.tp.points,
+      curTP.value,
+      TP_CAP,
+      TP_RATE_MS,
+      HISTORY_RETENTION_MS,
+      nowTs,
+      wastedReset.tp
+    );
+  }, [history.tp.points, curTP.value, tick, wastedReset.tp]);
   const rpWasted = useMemo(() => {
     const nowTs = now();
-    return computeWastedAtCap(history.rp.points, curRP.value, RP_CAP, RP_RATE_MS, HISTORY_RETENTION_MS, nowTs);
-  }, [history.rp.points, curRP.value, tick]);
+    return computeWastedAtCap(
+      history.rp.points,
+      curRP.value,
+      RP_CAP,
+      RP_RATE_MS,
+      HISTORY_RETENTION_MS,
+      nowTs,
+      wastedReset.rp
+    );
+  }, [history.rp.points, curRP.value, tick, wastedReset.rp]);
+  const resetWastedStats = useCallback(() => {
+    const ts = now();
+    setWastedResetState({ tp: ts, rp: ts });
+    sampleHistoryPoint("tp", curTP.value, ts, true);
+    sampleHistoryPoint("rp", curRP.value, ts, true);
+  }, [setWastedResetState, sampleHistoryPoint, curTP.value, curRP.value]);
   const hotkeyBindingsMap = useMemo(() => {
     const map = new Map<string, HotkeyActionId>();
     for (const action of HOTKEY_ACTIONS) {
@@ -3974,6 +4044,25 @@ export default function UmaResourceTracker() {
                 Current local time in {tzDraftTrimmed}: {tzPreview}
               </div>
             )}
+            <div
+              style={{
+                borderTop: `1px solid ${withAlpha(COLOR.border, 0.6)}`,
+                marginTop: 12,
+                paddingTop: 12,
+                display: "grid",
+                gap: 8,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>Resource stats</div>
+                <div style={{ fontSize: 12, color: COLOR.subtle, marginTop: 4 }}>
+                  Reset the time at cap and wasted RP/TP counters.
+                </div>
+              </div>
+              <div>
+                <SmallBtn onClick={resetWastedStats}>Reset wasted RP/TP tracking</SmallBtn>
+              </div>
+            </div>
             <div
               style={{
                 borderTop: `1px solid ${withAlpha(COLOR.border, 0.6)}`,
