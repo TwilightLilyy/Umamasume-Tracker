@@ -914,35 +914,12 @@ function ProgressBar({ value, max, color }: ProgressBarProps) {
   );
 }
 
-interface SparklineProps {
-  points: ResourceHistoryPoint[];
-  events: ResourceHistoryEvent[];
-  color: string;
-  cap: number;
-  currentValue: number;
-  retentionMs: number;
-  resourceLabel: string;
-  timeZone: string;
-  height?: number;
-}
-
-function Sparkline({
-  points,
-  events,
-  color,
-  cap,
-  currentValue,
-  retentionMs,
-  resourceLabel,
-  timeZone,
-  height = 40,
-}: SparklineProps) {
-  const width = 100;
-  const nowMs = now();
-  const domainStart = nowMs - retentionMs;
-  const domainEnd = nowMs;
-  const span = Math.max(domainEnd - domainStart, 1);
-
+function buildHistorySeries(
+  points: ResourceHistoryPoint[],
+  currentValue: number,
+  domainStart: number,
+  domainEnd: number
+) {
   const filtered = points.filter((p) => p.ts >= domainStart);
   const series: ResourceHistoryPoint[] = filtered.length ? [...filtered] : [];
   if (!series.length) {
@@ -961,6 +938,27 @@ function Sparkline({
   if (series.length === 1) {
     series.push({ ts: domainEnd, value: series[0].value });
   }
+  return series;
+}
+
+interface SparklineProps {
+  points: ResourceHistoryPoint[];
+  color: string;
+  cap: number;
+  currentValue: number;
+  retentionMs: number;
+  label: string;
+  height?: number;
+}
+
+function Sparkline({ points, color, cap, currentValue, retentionMs, label, height = 40 }: SparklineProps) {
+  const width = 100;
+  const nowMs = now();
+  const domainStart = nowMs - retentionMs;
+  const domainEnd = nowMs;
+  const span = Math.max(domainEnd - domainStart, 1);
+
+  const series = buildHistorySeries(points, currentValue, domainStart, domainEnd);
 
   const coords = series.map((p) => {
     const x = ((p.ts - domainStart) / span) * width;
@@ -973,8 +971,8 @@ function Sparkline({
 
   const areaPath = `M0,${height} L${coords.join(" L ")} L${width},${height} Z`;
   const linePath = `M${coords.join(" L ")}`;
-
-  const markerEvents = events.filter((event) => event.ts >= domainStart && event.ts <= domainEnd + 1000);
+  const capY = 0;
+  const capStroke = withAlpha(mixColor(color, "#ffffff", 0.45), 0.7);
 
   return (
     <div style={{ width: "100%", height }}>
@@ -984,31 +982,69 @@ function Sparkline({
         viewBox={`0 0 ${width} ${height}`}
         preserveAspectRatio="none"
         role="img"
-        aria-label={`${resourceLabel} history sparkline`}
+        aria-label={`${label} history sparkline`}
       >
         <path d={areaPath} fill={withAlpha(mixColor(color, COLOR.bg, 0.35), 0.25)} stroke="none" />
+        {cap > 0 && (
+          <line
+            x1={0}
+            y1={capY.toFixed(2)}
+            x2={width}
+            y2={capY.toFixed(2)}
+            stroke={capStroke}
+            strokeWidth={0.8}
+            strokeDasharray="3 3"
+          />
+        )}
         <path d={linePath} fill="none" stroke={color} strokeWidth={1.6} strokeLinecap="round" />
-        {markerEvents.map((event) => {
-          const x = ((event.ts - domainStart) / span) * width;
-          const ratio = cap > 0 ? clamp(event.value / cap, 0, 1) : 0;
-          const y = height - ratio * height;
-          return (
-            <circle
-              key={event.id}
-              cx={x}
-              cy={y}
-              r={1.9}
-              fill={mixColor(color, "#ffffff", 0.15)}
-              stroke={mixColor(color, "#000000", 0.35)}
-              strokeWidth={0.5}
-            >
-              <title>{describeHistoryEvent(event, resourceLabel, timeZone)}</title>
-            </circle>
-          );
-        })}
       </svg>
     </div>
   );
+}
+
+interface WastedInfo {
+  ms: number;
+  points: number;
+}
+
+function computeWastedAtCap(
+  points: ResourceHistoryPoint[],
+  currentValue: number,
+  cap: number,
+  rateMs: number,
+  retentionMs: number,
+  nowMs: number
+): WastedInfo {
+  if (!(cap > 0) || !(rateMs > 0)) return { ms: 0, points: 0 };
+  const domainStart = nowMs - retentionMs;
+  const domainEnd = nowMs;
+  const series = buildHistorySeries(points, currentValue, domainStart, domainEnd);
+  let wastedMs = 0;
+  for (let i = 0; i < series.length - 1; i++) {
+    const a = series[i];
+    const b = series[i + 1];
+    const segStart = Math.max(a.ts, domainStart);
+    const segEnd = Math.min(b.ts, domainEnd);
+    if (segEnd <= segStart) continue;
+    const startVal = Math.min(cap, Math.max(0, a.value));
+    const endVal = Math.min(cap, Math.max(0, b.value));
+    if (startVal >= cap) {
+      wastedMs += segEnd - segStart;
+      continue;
+    }
+    if (endVal >= cap && startVal < cap) {
+      const totalDuration = b.ts - a.ts;
+      const totalDelta = endVal - startVal;
+      if (totalDuration <= 0 || totalDelta <= 0) continue;
+      const slope = totalDelta / totalDuration;
+      const timeToCap = (cap - startVal) / slope;
+      const hitTs = a.ts + timeToCap;
+      const capStart = Math.max(hitTs, segStart);
+      if (segEnd > capStart) wastedMs += segEnd - capStart;
+    }
+  }
+  const wastedPoints = wastedMs / rateMs;
+  return { ms: wastedMs, points: wastedPoints };
 }
 
 interface SmallBtnProps {
@@ -1286,6 +1322,15 @@ interface ResourceCardProps {
   onSetAmount: (value: number) => void;
   history: ResourceHistorySnapshot;
   historyRetentionMs: number;
+  wasted: WastedInfo;
+}
+
+function formatWastedPoints(points: number) {
+  const safe = Math.max(0, points);
+  if (safe >= 10) return Math.round(safe).toString();
+  if (safe >= 1) return safe.toFixed(1);
+  if (safe > 0) return safe.toFixed(2);
+  return "0";
 }
 
 function ResourceCard({
@@ -1308,6 +1353,7 @@ function ResourceCard({
   onSetAmount,
   history,
   historyRetentionMs,
+  wasted,
 }: ResourceCardProps) {
   const [nextInput, setNextInput] = useState("");
   const [amountInput, setAmountInput] = useState("");
@@ -1317,6 +1363,8 @@ function ResourceCard({
   const historyWindowLabel = `${Math.round(historyRetentionMs / 3600000)}h`;
   const recentEvents = history.events.slice(-3).reverse();
   const sparklineHeight = hud ? 28 : 44;
+  const wastedDurationLabel = formatDHMS(Math.round(Math.max(0, wasted.ms)));
+  const wastedPointsLabel = formatWastedPoints(wasted.points);
 
   const bigValStyle: React.CSSProperties = {
     fontWeight: 800,
@@ -1350,17 +1398,18 @@ function ResourceCard({
       <div style={{ marginTop: 6 }}>
         <Sparkline
           points={history.points}
-          events={history.events}
           color={accent}
           cap={cap}
           currentValue={current.value}
           retentionMs={historyRetentionMs}
-          resourceLabel={name}
-          timeZone={zone}
+          label={name}
           height={sparklineHeight}
         />
         <div style={{ fontSize: 11, color: COLOR.subtle, marginTop: 4 }}>
-          History ({historyWindowLabel}) — hover markers for spends & resets
+          History ({historyWindowLabel})
+        </div>
+        <div style={{ fontSize: 11, color: COLOR.subtle, marginTop: 2 }}>
+          At cap {wastedDurationLabel} (≈ {wastedPointsLabel} {name} wasted)
         </div>
         {recentEvents.length > 0 && (
           <ul
@@ -2735,13 +2784,11 @@ function OverlayView({
         <div style={{ marginTop: 8 }}>
           <Sparkline
             points={tpHistory.points}
-            events={tpHistory.events}
             color={COLOR.tp}
             cap={TP_CAP}
             currentValue={curTP.value}
             retentionMs={historyRetentionMs}
-            resourceLabel="TP"
-            timeZone={zone}
+            label="TP"
             height={32}
           />
         </div>
@@ -2757,13 +2804,11 @@ function OverlayView({
         <div style={{ marginTop: 8 }}>
           <Sparkline
             points={rpHistory.points}
-            events={rpHistory.events}
             color={COLOR.rp}
             cap={RP_CAP}
             currentValue={curRP.value}
             retentionMs={historyRetentionMs}
-            resourceLabel="RP"
-            timeZone={zone}
+            label="RP"
             height={32}
           />
         </div>
@@ -3319,6 +3364,14 @@ export default function UmaResourceTracker() {
   );
   const rpFull = useMemo(() => timeToFull(curRP, RP_RATE_MS, RP_CAP), [curRP]);
   const tpFull = useMemo(() => timeToFull(curTP, TP_RATE_MS, TP_CAP), [curTP]);
+  const tpWasted = useMemo(() => {
+    const nowTs = now();
+    return computeWastedAtCap(history.tp.points, curTP.value, TP_CAP, TP_RATE_MS, HISTORY_RETENTION_MS, nowTs);
+  }, [history.tp.points, curTP.value, tick]);
+  const rpWasted = useMemo(() => {
+    const nowTs = now();
+    return computeWastedAtCap(history.rp.points, curRP.value, RP_CAP, RP_RATE_MS, HISTORY_RETENTION_MS, nowTs);
+  }, [history.rp.points, curRP.value, tick]);
   const hotkeyBindingsMap = useMemo(() => {
     const map = new Map<string, HotkeyActionId>();
     for (const action of HOTKEY_ACTIONS) {
@@ -4027,6 +4080,7 @@ export default function UmaResourceTracker() {
           onSetAmount={(value) => setTPAmount(value)}
           history={history.tp}
           historyRetentionMs={HISTORY_RETENTION_MS}
+          wasted={tpWasted}
         />
 
         <ResourceCard
@@ -4049,6 +4103,7 @@ export default function UmaResourceTracker() {
           onSetAmount={(value) => setRPAmount(value)}
           history={history.rp}
           historyRetentionMs={HISTORY_RETENTION_MS}
+          wasted={rpWasted}
         />
       </div>
 
