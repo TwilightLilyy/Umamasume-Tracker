@@ -23,6 +23,21 @@ export interface OverlayRendererState extends OverlayState {
   editing?: boolean;
 }
 
+export interface OverlayResourceSnapshot {
+  value: number;
+  nextMs: number;
+  fullMs: number;
+  atCap: boolean;
+}
+
+export interface OverlaySnapshotPayload {
+  tp: OverlayResourceSnapshot;
+  rp: OverlayResourceSnapshot;
+  timestamp: number;
+}
+
+export const OVERLAY_SNAPSHOT_CHANNEL = "uma-overlay-snapshot";
+
 export interface OverlayBridge {
   getState(): Promise<OverlayState>;
   show(): Promise<void>;

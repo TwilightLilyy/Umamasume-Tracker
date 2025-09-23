@@ -5,7 +5,12 @@ import {
   formatMMSS,
   sanitizeResource,
 } from "../App";
-import type { OverlayRendererState } from "../types/overlay";
+import {
+  OVERLAY_SNAPSHOT_CHANNEL,
+  type OverlayRendererState,
+  type OverlayResourceSnapshot,
+  type OverlaySnapshotPayload,
+} from "../types/overlay";
 import "../styles/overlay.css";
 
 const TP_RATE_MS = 10 * 60 * 1000;
@@ -19,18 +24,6 @@ interface ResourceState {
   nextOverride: number | null;
 }
 
-interface ResourceSnapshot {
-  value: number;
-  nextMs: number;
-  fullMs: number;
-  atCap: boolean;
-}
-
-interface OverlaySnapshot {
-  tp: ResourceSnapshot;
-  rp: ResourceSnapshot;
-}
-
 function now() {
   return Date.now();
 }
@@ -40,7 +33,39 @@ function safeParseResource(value: unknown, cap: number, fallback: ResourceState)
   return sanitizeResource(value as Partial<ResourceState>, cap, fallback);
 }
 
-function readResource(key: string, cap: number, defaults: ResourceState, rateMs: number): ResourceSnapshot {
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function parseResourceSnapshot(data: unknown): OverlayResourceSnapshot | null {
+  if (!data || typeof data !== "object") return null;
+  const raw = data as Partial<OverlayResourceSnapshot>;
+  if (!isFiniteNumber(raw.value) || !isFiniteNumber(raw.nextMs) || !isFiniteNumber(raw.fullMs))
+    return null;
+  return {
+    value: Math.max(0, raw.value),
+    nextMs: Math.max(0, raw.nextMs),
+    fullMs: Math.max(0, raw.fullMs),
+    atCap: raw.atCap ?? false,
+  };
+}
+
+function parseOverlaySnapshotData(data: unknown): OverlaySnapshotPayload | null {
+  if (!data || typeof data !== "object") return null;
+  const raw = data as Partial<OverlaySnapshotPayload>;
+  const tp = parseResourceSnapshot(raw.tp);
+  const rp = parseResourceSnapshot(raw.rp);
+  if (!tp || !rp) return null;
+  const timestamp = isFiniteNumber(raw.timestamp) ? raw.timestamp : now();
+  return { tp, rp, timestamp };
+}
+
+function readResource(
+  key: string,
+  cap: number,
+  defaults: ResourceState,
+  rateMs: number
+): OverlayResourceSnapshot {
   let parsed: unknown = null;
   try {
     const raw = typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
@@ -63,7 +88,7 @@ function readResource(key: string, cap: number, defaults: ResourceState, rateMs:
   };
 }
 
-function readSnapshot(): OverlaySnapshot {
+function readSnapshot(): OverlaySnapshotPayload {
   return {
     tp: readResource(
       "uma.tp",
@@ -85,17 +110,42 @@ function readSnapshot(): OverlaySnapshot {
       },
       RP_RATE_MS,
     ),
+    timestamp: now(),
   };
 }
 
 function useOverlaySnapshot() {
-  const [snapshot, setSnapshot] = useState<OverlaySnapshot>(() => readSnapshot());
+  const [snapshot, setSnapshot] = useState<OverlaySnapshotPayload>(() => readSnapshot());
+  const preferBroadcastRef = useRef(false);
+
   useEffect(() => {
-    const tick = () => setSnapshot(readSnapshot());
+    const tick = () => {
+      if (preferBroadcastRef.current) return;
+      setSnapshot(readSnapshot());
+    };
     tick();
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (typeof BroadcastChannel === "undefined") return;
+    let disposed = false;
+    const channel = new BroadcastChannel(OVERLAY_SNAPSHOT_CHANNEL);
+    channel.onmessage = (event) => {
+      if (disposed) return;
+      const parsed = parseOverlaySnapshotData(event.data);
+      if (!parsed) return;
+      preferBroadcastRef.current = true;
+      setSnapshot(parsed);
+    };
+    return () => {
+      disposed = true;
+      channel.close();
+    };
+  }, []);
+
   return snapshot;
 }
 

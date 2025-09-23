@@ -118,7 +118,7 @@ function appendQuery(base: string, query: string) {
 function resolveOverlayUrl(raw?: string | null) {
   const base = rendererBaseUrl ?? defaultBaseUrl();
   if (!raw || !raw.trim()) {
-    return appendQuery(base, "?hud=1&overlay=tp");
+    return appendPath(base, "/overlay");
   }
   const trimmed = raw.trim();
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
