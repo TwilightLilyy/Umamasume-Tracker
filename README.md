@@ -85,9 +85,30 @@ Overlay URLs use the following patterns if you want to build them manually:
 - `?hud=1&overlay=timer:<timerId>` – specific flexible timer
 - `?hud=1&overlay=abs:<timerId>` – specific exact date/time timer
 
-### Keyboard shortcuts
+### Desktop app & transparent overlay
 
-The app is mouse-driven; no dedicated keyboard shortcuts are defined.
+The Electron desktop build ships with a frameless, always-on-top overlay window that loads the `/overlay` route (or any URL you provide). To open it:
+
+1. Launch the desktop app and go to **Settings → Overlay**.
+2. Click **Show overlay** or press **Ctrl+Alt+O**. The overlay appears locked by default, so all mouse clicks pass through to your desktop or game.
+3. Use **Ctrl+Alt+M** to unlock the overlay when you need to move or resize it. A slim “🔓 Editing” header appears while unlocked—drag it or the bottom-right grip, then press **Ctrl+Alt+M** again to lock.
+
+Additional overlay tips:
+
+- Update the destination URL from the Overlay settings panel (paste a copied overlay URL or leave it blank to use the built-in `/overlay` view).
+- Adjust scale and opacity with the on-screen controls or the shortcuts below; both settings are persisted along with the overlay position and size.
+- Enable **Start overlay with the app** if you want the window to re-open automatically after launch.
+- Use **Ctrl+Alt+R** to reload the overlay content after tweaking styles.
+
+### Keyboard shortcuts (desktop app)
+
+The transparent overlay registers global shortcuts while the desktop app is running:
+
+- `Ctrl+Alt+O` – Toggle overlay visibility.
+- `Ctrl+Alt+M` – Lock/unlock editing (enables or disables click-through).
+- `Ctrl+Alt+=` / `Ctrl+Alt+-` – Increase/decrease overlay scale in 10% steps.
+- `Ctrl+Alt+Up` / `Ctrl+Alt+Down` – Raise/lower overlay opacity in 5% steps.
+- `Ctrl+Alt+R` – Reload the overlay web contents.
 
 ## Project structure
 
