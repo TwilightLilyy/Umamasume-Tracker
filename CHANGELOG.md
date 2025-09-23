@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Transparent Electron overlay window with persistent bounds, scale, opacity, and lock state controls available from Settings → Overlay.
+- Global shortcuts (Ctrl+Alt+O/M/=/-, Ctrl+Alt+Arrow keys, Ctrl+Alt+R) to manage overlay visibility, editing mode, scale, opacity, and reload.
+
 ## [0.1.0] - 2025-09-21
 
 ### Added

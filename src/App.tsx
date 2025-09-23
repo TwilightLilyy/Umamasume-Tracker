@@ -1,5 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import OverlaySettingsPanel from "./settings/OverlaySettings";
+import { OVERLAY_SNAPSHOT_CHANNEL } from "./types/overlay";
+import type { OverlayResourceSnapshot, OverlaySnapshotPayload } from "./types/overlay";
+
 import {
   createEmptyHistoryState,
   type ResourceHistoryEventInput,
@@ -3022,6 +3026,19 @@ export default function UmaResourceTracker() {
   const lastResetTsRef = useRef<number | null>(null);
 
   const activeTimeZone = ensureTimeZone(timezone);
+  const overlayApi = typeof window !== "undefined" ? window.umaOverlay : undefined;
+  const overlayChannelRef = useRef<BroadcastChannel | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (typeof BroadcastChannel === "undefined") return;
+    const channel = new BroadcastChannel(OVERLAY_SNAPSHOT_CHANNEL);
+    overlayChannelRef.current = channel;
+    return () => {
+      overlayChannelRef.current = null;
+      channel.close();
+    };
+  }, []);
 
   useEffect(() => {
     setHotkeys((prev) => {
@@ -3412,6 +3429,40 @@ export default function UmaResourceTracker() {
   );
   const rpFull = useMemo(() => timeToFull(curRP, RP_RATE_MS, RP_CAP), [curRP]);
   const tpFull = useMemo(() => timeToFull(curTP, TP_RATE_MS, TP_CAP), [curTP]);
+  const overlaySnapshot = useMemo<OverlaySnapshotPayload>(() => {
+    const nowMs = now();
+    const buildSnapshot = (
+      current: CurrentResource,
+      rateMs: number,
+      cap: number
+    ): OverlayResourceSnapshot => {
+      const nextMs = Math.max(0, current.nextPoint - nowMs);
+      const need = Math.max(0, cap - current.value);
+      const first = Math.max(0, nextMs);
+      const fullMs = need === 0 ? 0 : first + Math.max(0, need - 1) * rateMs;
+      return {
+        value: current.value,
+        nextMs,
+        fullMs,
+        atCap: current.value >= cap,
+      };
+    };
+    return {
+      tp: buildSnapshot(curTP, TP_RATE_MS, TP_CAP),
+      rp: buildSnapshot(curRP, RP_RATE_MS, RP_CAP),
+      timestamp: nowMs,
+    };
+  }, [curTP, curRP, tick]);
+
+  useEffect(() => {
+    const channel = overlayChannelRef.current;
+    if (!channel) return;
+    try {
+      channel.postMessage(overlaySnapshot);
+    } catch {
+      // ignore broadcast errors
+    }
+  }, [overlaySnapshot]);
   const tpWasted = useMemo(() => {
     const nowTs = now();
     return computeWastedAtCap(
@@ -4044,6 +4095,15 @@ export default function UmaResourceTracker() {
                 Current local time in {tzDraftTrimmed}: {tzPreview}
               </div>
             )}
+            <OverlaySettingsPanel
+              overlayApi={overlayApi}
+              palette={{
+                text: COLOR.text,
+                subtle: COLOR.subtle,
+                border: withAlpha(COLOR.border, 0.6),
+                accent: COLOR.tp,
+              }}
+            />
             <div
               style={{
                 borderTop: `1px solid ${withAlpha(COLOR.border, 0.6)}`,

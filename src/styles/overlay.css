@@ -1,0 +1,133 @@
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: #f8fbff;
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  overflow: hidden;
+}
+
+body.overlay-unlocked {
+  backdrop-filter: blur(16px);
+}
+
+.overlay-shell {
+  position: relative;
+  padding: 10px 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 260px;
+  pointer-events: auto;
+}
+
+.overlay-shell.overlay-compact {
+  padding: 8px 12px 14px;
+  gap: 8px;
+}
+
+.overlay-edit-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.7);
+  color: #f8fbff;
+  -webkit-app-region: drag;
+  gap: 8px;
+}
+
+.overlay-edit-bar button {
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: rgba(15, 23, 42, 0.85);
+  color: inherit;
+  padding: 2px 10px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.overlay-edit-bar button:hover {
+  background: rgba(30, 41, 59, 0.9);
+}
+
+.overlay-content {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+  -webkit-app-region: no-drag;
+}
+
+.overlay-shell.overlay-compact .overlay-content {
+  gap: 10px;
+}
+
+.overlay-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.overlay-label {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.overlay-value {
+  font-size: 74px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.overlay-shell.overlay-compact .overlay-value {
+  font-size: 60px;
+}
+
+.overlay-sub {
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+.overlay-cap {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(250, 204, 21, 0.2);
+  color: #fde68a;
+}
+
+.overlay-resize-grip {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  bottom: 4px;
+  right: 4px;
+  border-right: 2px solid rgba(255, 255, 255, 0.6);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.6);
+  opacity: 0.8;
+  cursor: se-resize;
+  -webkit-app-region: no-drag;
+}
+
+body:not(.overlay-unlocked) .overlay-resize-grip {
+  display: none;
+}
+
+body.overlay-unlocked .overlay-shell {
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.48);
+  background: rgba(15, 23, 42, 0.28);
+}
