@@ -180,6 +180,15 @@ function useQueryParams() {
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 function Overlay() {
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const { classList } = document.body;
+    classList.add("overlay-mode");
+    return () => {
+      classList.remove("overlay-mode");
+    };
+  }, []);
+
   const snapshot = useOverlaySnapshot();
   const overlayState = useOverlayRendererState();
   const params = useQueryParams();
