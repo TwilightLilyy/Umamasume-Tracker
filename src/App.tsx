@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import OverlaySettingsPanel from "./settings/OverlaySettings";
+
 import {
   createEmptyHistoryState,
   type ResourceHistoryEventInput,
@@ -3022,6 +3024,7 @@ export default function UmaResourceTracker() {
   const lastResetTsRef = useRef<number | null>(null);
 
   const activeTimeZone = ensureTimeZone(timezone);
+  const overlayApi = typeof window !== "undefined" ? window.umaOverlay : undefined;
 
   useEffect(() => {
     setHotkeys((prev) => {
@@ -4044,6 +4047,15 @@ export default function UmaResourceTracker() {
                 Current local time in {tzDraftTrimmed}: {tzPreview}
               </div>
             )}
+            <OverlaySettingsPanel
+              overlayApi={overlayApi}
+              palette={{
+                text: COLOR.text,
+                subtle: COLOR.subtle,
+                border: withAlpha(COLOR.border, 0.6),
+                accent: COLOR.tp,
+              }}
+            />
             <div
               style={{
                 borderTop: `1px solid ${withAlpha(COLOR.border, 0.6)}`,
