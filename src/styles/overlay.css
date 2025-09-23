@@ -2,8 +2,7 @@
   color-scheme: dark;
 }
 
-html,
-body {
+body.overlay-mode {
   margin: 0;
   padding: 0;
   background: transparent;
