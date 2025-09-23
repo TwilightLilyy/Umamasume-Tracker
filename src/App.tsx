@@ -1053,19 +1053,34 @@ function computeWastedAtCap(
   resetStartMs?: number | null
 ): WastedInfo {
   if (!(cap > 0) || !(rateMs > 0)) return { ms: 0, points: 0 };
-  let domainStart = nowMs - retentionMs;
+  const domainEnd = nowMs;
+  if (!Number.isFinite(domainEnd)) return { ms: 0, points: 0 };
+  let domainStart = domainEnd - retentionMs;
   if (Number.isFinite(resetStartMs)) {
-    const resetClamped = Math.min(resetStartMs as number, nowMs);
+    const resetClamped = Math.min(resetStartMs as number, domainEnd);
     domainStart = Math.max(domainStart, resetClamped);
   }
-  const domainEnd = nowMs;
   if (domainStart > domainEnd) return { ms: 0, points: 0 };
-  const series = buildHistorySeries(points, currentValue, domainStart, domainEnd);
+
+  let effectiveDomainStart = domainStart;
+  let earliestSample: number | null = null;
+  for (const point of points) {
+    const ts = Number(point?.ts);
+    if (!Number.isFinite(ts) || ts < domainStart || ts > domainEnd) continue;
+    if (earliestSample == null || ts < earliestSample) earliestSample = ts;
+  }
+  if (earliestSample == null) {
+    effectiveDomainStart = domainEnd;
+  } else if (earliestSample > effectiveDomainStart) {
+    effectiveDomainStart = earliestSample;
+  }
+
+  const series = buildHistorySeries(points, currentValue, effectiveDomainStart, domainEnd);
   let wastedMs = 0;
   for (let i = 0; i < series.length - 1; i++) {
     const a = series[i];
     const b = series[i + 1];
-    const segStart = Math.max(a.ts, domainStart);
+    const segStart = Math.max(a.ts, effectiveDomainStart);
     const segEnd = Math.min(b.ts, domainEnd);
     if (segEnd <= segStart) continue;
     const startVal = Math.min(cap, Math.max(0, a.value));
@@ -4461,6 +4476,56 @@ export default function UmaResourceTracker() {
 
     const ndr = nextDailyResetTS(new Date(), DEFAULT_TZ);
     eq(Number.isFinite(ndr) && ndr > Date.now(), true, "nextDailyResetTS returns a future finite timestamp");
+
+    const base = nowMs - 5 * 60 * 1000;
+    const capSeries = [
+      { ts: base, value: 100 },
+      { ts: base + 60 * 1000, value: 100 },
+    ];
+    const wastedAtCap = computeWastedAtCap(
+      capSeries,
+      100,
+      100,
+      60 * 1000,
+      HISTORY_RETENTION_MS,
+      base + 60 * 1000,
+      null,
+    );
+    eq(Math.round(wastedAtCap.ms / 1000), 60, "computeWastedAtCap captures minutes at cap");
+
+    const afterSpendSeries = [
+      ...capSeries,
+      { ts: base + 60 * 1000 + 1000, value: 50 },
+    ];
+    const wastedAfterSpend = computeWastedAtCap(
+      afterSpendSeries,
+      50,
+      100,
+      60 * 1000,
+      HISTORY_RETENTION_MS,
+      base + 60 * 1000 + 1000,
+      null,
+    );
+    eq(
+      Math.round(wastedAfterSpend.ms / 1000),
+      Math.round(wastedAtCap.ms / 1000),
+      "computeWastedAtCap remains stable immediately after spending",
+    );
+
+    const wastedLater = computeWastedAtCap(
+      afterSpendSeries,
+      50,
+      100,
+      60 * 1000,
+      HISTORY_RETENTION_MS,
+      base + 60 * 1000 + 10 * 60 * 1000,
+      null,
+    );
+    eq(
+      Math.round(wastedLater.ms / 1000),
+      Math.round(wastedAtCap.ms / 1000),
+      "computeWastedAtCap does not decrease once off cap",
+    );
   } catch (e) {
     console.warn("Test harness error: ", e);
   }
