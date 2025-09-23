@@ -7,6 +7,8 @@ import type { OverlayBounds, OverlayState } from "../src/types/overlay.js";
 const OVERLAY_STATE_FILE = "overlay-window.json";
 const DEFAULT_WIDTH = 400;
 const DEFAULT_HEIGHT = 180;
+const MIN_WIDTH = 200;
+const MIN_HEIGHT = 120;
 const MIN_SCALE = 0.4;
 const MAX_SCALE = 3.0;
 const MIN_OPACITY = 0.3;
@@ -74,6 +76,62 @@ function broadcastState() {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function rectsOverlap(a: Rect, b: Rect) {
+  const overlapX = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+  const overlapY = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  return overlapX > 0 && overlapY > 0;
+}
+
+function toRect(bounds: OverlayBounds | Rect | null | undefined): Rect | null {
+  if (!bounds) return null;
+  const width = Math.max(Math.round(bounds.width), MIN_WIDTH);
+  const height = Math.max(Math.round(bounds.height), MIN_HEIGHT);
+  return {
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
+    width,
+    height,
+  };
+}
+
+function ensureVisibleBounds(bounds: OverlayBounds | null | undefined, fallback: Rect): Rect {
+  const candidate = toRect(bounds) ?? { ...fallback };
+  const displays = screen.getAllDisplays();
+  if (displays.length === 0) {
+    return candidate;
+  }
+
+  const intersects = displays.some((display) => {
+    const area = display.workArea ?? display.bounds;
+    return rectsOverlap(candidate, { x: area.x, y: area.y, width: area.width, height: area.height });
+  });
+
+  if (intersects) {
+    return candidate;
+  }
+
+  const centerX = candidate.x + Math.round(candidate.width / 2);
+  const centerY = candidate.y + Math.round(candidate.height / 2);
+  const nearest = screen.getDisplayNearestPoint({ x: centerX, y: centerY });
+  const nearestArea = nearest.workArea ?? nearest.bounds;
+  const maxX = Math.max(nearestArea.x, nearestArea.x + nearestArea.width - candidate.width);
+  const maxY = Math.max(nearestArea.y, nearestArea.y + nearestArea.height - candidate.height);
+
+  return {
+    x: clamp(candidate.x, nearestArea.x, maxX),
+    y: clamp(candidate.y, nearestArea.y, maxY),
+    width: candidate.width,
+    height: candidate.height,
+  };
 }
 
 function defaultBaseUrl() {
@@ -153,12 +211,14 @@ function applyOpacity(win: BrowserWindow, opacity: number) {
 
 function applyBounds(win: BrowserWindow, bounds: OverlayBounds | null | undefined) {
   if (!bounds) return;
-  win.setBounds({
+  const safeBounds = ensureVisibleBounds(bounds, {
     x: Math.round(bounds.x),
     y: Math.round(bounds.y),
-    width: Math.max(Math.round(bounds.width), 200),
-    height: Math.max(Math.round(bounds.height), 120),
+    width: Math.max(Math.round(bounds.width), MIN_WIDTH),
+    height: Math.max(Math.round(bounds.height), MIN_HEIGHT),
   });
+  win.setBounds(safeBounds);
+  overlayState.bounds = safeBounds;
 }
 
 function handleWindowMoveOrResize() {
@@ -195,12 +255,20 @@ export function createOverlayWindow() {
   const workArea = display?.workArea ?? { x: 0, y: 0, width: 1280, height: 720 };
   const defaultX = Math.round(workArea.x + (workArea.width - DEFAULT_WIDTH) / 2);
   const defaultY = Math.round(workArea.y + (workArea.height - DEFAULT_HEIGHT) / 3);
+  const fallbackBounds: Rect = {
+    x: defaultX,
+    y: defaultY,
+    width: DEFAULT_WIDTH,
+    height: DEFAULT_HEIGHT,
+  };
+  const initialBounds = ensureVisibleBounds(overlayState.bounds, fallbackBounds);
+  overlayState.bounds = initialBounds;
 
   const win = new BrowserWindow({
-    width: overlayState.bounds?.width ?? DEFAULT_WIDTH,
-    height: overlayState.bounds?.height ?? DEFAULT_HEIGHT,
-    x: overlayState.bounds?.x ?? defaultX,
-    y: overlayState.bounds?.y ?? defaultY,
+    width: initialBounds.width,
+    height: initialBounds.height,
+    x: initialBounds.x,
+    y: initialBounds.y,
     show: false,
     frame: false,
     transparent: true,
@@ -338,12 +406,13 @@ export function reloadOverlay() {
 export function resetOverlayBounds() {
   const display = screen.getPrimaryDisplay();
   const workArea = display?.workArea ?? { x: 0, y: 0, width: 1280, height: 720 };
-  overlayState.bounds = {
+  const fallbackBounds: Rect = {
     x: Math.round(workArea.x + (workArea.width - DEFAULT_WIDTH) / 2),
     y: Math.round(workArea.y + (workArea.height - DEFAULT_HEIGHT) / 3),
     width: DEFAULT_WIDTH,
     height: DEFAULT_HEIGHT,
   };
+  overlayState.bounds = fallbackBounds;
   const win = createOverlayWindow();
   applyBounds(win, overlayState.bounds);
   persistOverlayState();
