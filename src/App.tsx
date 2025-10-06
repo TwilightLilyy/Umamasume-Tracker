@@ -38,6 +38,8 @@ const COLOR = {
   tp: "#facc15",
   // Keep RP blue to match the in-game resource card styling.
   rp: "#38bdf8",
+  fans: "#f97316",
+  carats: "#a855f7",
   good: "#22c55e",
   danger: "#f87171",
   slate700: "#2c3a57",
@@ -258,6 +260,254 @@ function findFallbackGroupId(groups: AbsTimerGroup[]) {
 }
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_WEEKLY_FANS_TARGET = 2_000_000;
+const MAX_WEEKLY_FANS_TARGET = 1_000_000_000;
+
+interface FansCaratsEntry {
+  date: string;
+  fans: number;
+  carats: number;
+}
+
+interface FansCaratsState {
+  entries: FansCaratsEntry[];
+}
+
+interface FansCaratsDailyStat extends FansCaratsEntry {
+  fansDelta: number | null;
+  caratsDelta: number | null;
+}
+
+interface FansCaratsWeeklySummary {
+  weekStart: string;
+  weekEnd: string;
+  lastEntry: string;
+  fansDelta: number;
+  caratsDelta: number;
+  daysLogged: number;
+}
+
+interface RollingTotal {
+  fans: number;
+  carats: number;
+}
+
+interface TrendPoint {
+  ts: number;
+  value: number;
+}
+
+interface FansCaratsConfig {
+  weeklyFansTarget: number;
+}
+
+function pad2(value: number) {
+  return String(Math.trunc(Math.abs(value))).padStart(2, "0");
+}
+
+function normalizeISODate(value: string | null | undefined) {
+  if (!value) return null;
+  const match = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(value.trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  if (month < 1 || month > 12) return null;
+  if (day < 1 || day > 31) return null;
+  const ms = Date.UTC(year, month - 1, day);
+  if (!Number.isFinite(ms)) return null;
+  const d = new Date(ms);
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() + 1 !== month || d.getUTCDate() !== day) return null;
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+function dateStringToMs(date: string) {
+  const normalized = normalizeISODate(date);
+  if (!normalized) return Number.NaN;
+  const [year, month, day] = normalized.split("-").map((part) => Number(part));
+  return Date.UTC(year, month - 1, day);
+}
+
+function msToISODate(ms: number) {
+  const d = new Date(ms);
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+}
+
+function startOfWeekISO(date: string) {
+  const ms = dateStringToMs(date);
+  if (!Number.isFinite(ms)) return date;
+  const d = new Date(ms);
+  const day = d.getUTCDay();
+  const diff = (day + 6) % 7;
+  return msToISODate(ms - diff * DAY_MS);
+}
+
+function endOfWeekISO(date: string) {
+  const start = startOfWeekISO(date);
+  const startMs = dateStringToMs(start);
+  if (!Number.isFinite(startMs)) return start;
+  return msToISODate(startMs + 6 * DAY_MS);
+}
+
+function getTodayISODate() {
+  const nowDate = new Date();
+  return `${nowDate.getFullYear()}-${pad2(nowDate.getMonth() + 1)}-${pad2(nowDate.getDate())}`;
+}
+
+function formatDateLabel(date: string) {
+  const ms = dateStringToMs(date);
+  if (!Number.isFinite(ms)) return date;
+  return new Date(ms).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    weekday: "short",
+  });
+}
+
+function formatWeekRange(start: string, end: string) {
+  return `${formatDateLabel(start)} – ${formatDateLabel(end)}`;
+}
+
+function formatNumber(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return Math.round(value).toLocaleString();
+}
+
+function formatDelta(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const rounded = Math.round(value);
+  const sign = rounded > 0 ? "+" : "";
+  return `${sign}${rounded.toLocaleString()}`;
+}
+
+function parseInteger(value: string) {
+  if (!value) return null;
+  const normalized = value.replace(/,/g, "").trim();
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.round(parsed);
+}
+
+function sanitizeFansCaratsState(value: unknown): FansCaratsState {
+  const entries: FansCaratsEntry[] = [];
+  const rawEntries: unknown =
+    value && typeof value === "object" && Array.isArray((value as FansCaratsState).entries)
+      ? (value as FansCaratsState).entries
+      : Array.isArray(value)
+      ? (value as FansCaratsEntry[])
+      : [];
+  const map = new Map<string, FansCaratsEntry>();
+  for (const entry of rawEntries as FansCaratsEntry[]) {
+    if (!entry || typeof entry !== "object") continue;
+    const normalizedDate = normalizeISODate((entry as FansCaratsEntry).date);
+    if (!normalizedDate) continue;
+    const fansNum = Number((entry as FansCaratsEntry).fans);
+    const caratsNum = Number((entry as FansCaratsEntry).carats);
+    if (!Number.isFinite(fansNum) || !Number.isFinite(caratsNum)) continue;
+    const fans = Math.max(0, Math.round(fansNum));
+    const carats = Math.max(0, Math.round(caratsNum));
+    map.set(normalizedDate, { date: normalizedDate, fans, carats });
+  }
+  const sortedDates = Array.from(map.keys()).sort((a, b) => a.localeCompare(b));
+  for (const date of sortedDates) {
+    entries.push(map.get(date)!);
+  }
+  return { entries };
+}
+
+function sanitizeFansCaratsConfig(value: unknown): FansCaratsConfig {
+  if (!value || typeof value !== "object") {
+    return { weeklyFansTarget: DEFAULT_WEEKLY_FANS_TARGET };
+  }
+  const target = Number((value as FansCaratsConfig).weeklyFansTarget);
+  if (!Number.isFinite(target) || target <= 0) return { weeklyFansTarget: DEFAULT_WEEKLY_FANS_TARGET };
+  const clamped = clamp(Math.round(target), 1, MAX_WEEKLY_FANS_TARGET);
+  return { weeklyFansTarget: clamped };
+}
+
+function buildFansCaratsDailyStats(entries: FansCaratsEntry[]): FansCaratsDailyStat[] {
+  const stats: FansCaratsDailyStat[] = [];
+  let prevFans: number | null = null;
+  let prevCarats: number | null = null;
+  const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date));
+  for (const entry of sorted) {
+    const fansDelta = prevFans == null ? null : entry.fans - prevFans;
+    const caratsDelta = prevCarats == null ? null : entry.carats - prevCarats;
+    stats.push({ ...entry, fansDelta, caratsDelta });
+    prevFans = entry.fans;
+    prevCarats = entry.carats;
+  }
+  return stats;
+}
+
+function buildRollingTotals(stats: FansCaratsDailyStat[], windowSize: number): Map<string, RollingTotal> {
+  const totals = new Map<string, RollingTotal>();
+  const queue: RollingTotal[] = [];
+  let fansSum = 0;
+  let caratsSum = 0;
+  for (const stat of stats) {
+    const fansDelta = stat.fansDelta ?? 0;
+    const caratsDelta = stat.caratsDelta ?? 0;
+    queue.push({ fans: fansDelta, carats: caratsDelta });
+    fansSum += fansDelta;
+    caratsSum += caratsDelta;
+    if (queue.length > windowSize) {
+      const removed = queue.shift();
+      if (removed) {
+        fansSum -= removed.fans;
+        caratsSum -= removed.carats;
+      }
+    }
+    totals.set(stat.date, { fans: fansSum, carats: caratsSum });
+  }
+  return totals;
+}
+
+function buildWeeklySummaries(stats: FansCaratsDailyStat[]): FansCaratsWeeklySummary[] {
+  const map = new Map<string, FansCaratsWeeklySummary>();
+  for (const stat of stats) {
+    const weekStart = startOfWeekISO(stat.date);
+    const weekEnd = endOfWeekISO(stat.date);
+    const existing = map.get(weekStart);
+    if (existing) {
+      existing.fansDelta += stat.fansDelta ?? 0;
+      existing.caratsDelta += stat.caratsDelta ?? 0;
+      existing.daysLogged += 1;
+      if (stat.date.localeCompare(existing.lastEntry) > 0) existing.lastEntry = stat.date;
+    } else {
+      map.set(weekStart, {
+        weekStart,
+        weekEnd,
+        lastEntry: stat.date,
+        fansDelta: stat.fansDelta ?? 0,
+        caratsDelta: stat.caratsDelta ?? 0,
+        daysLogged: 1,
+      });
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+}
+
+function buildTrendSeries(
+  stats: FansCaratsDailyStat[],
+  key: "fansDelta" | "caratsDelta",
+  limit = 30
+): TrendPoint[] {
+  if (!stats.length) return [];
+  const slice = stats.slice(Math.max(0, stats.length - limit));
+  const series = slice.map((stat) => ({
+    ts: dateStringToMs(stat.date),
+    value: stat[key] ?? 0,
+  }));
+  if (series.length === 1) {
+    series.push({ ts: series[0].ts + DAY_MS, value: series[0].value });
+  }
+  return series.filter((point) => Number.isFinite(point.ts));
+}
 
 function hexToRgb(hex: string) {
   const normalized = hex.trim().replace(/^#/, "");
@@ -1034,6 +1284,460 @@ function Sparkline({ points, color, cap, currentValue, retentionMs, label, heigh
         )}
         <path d={linePath} fill="none" stroke={color} strokeWidth={1.6} strokeLinecap="round" />
       </svg>
+    </div>
+  );
+}
+
+interface TrendSparklineProps {
+  data: TrendPoint[];
+  color: string;
+  label: string;
+  height?: number;
+}
+
+function TrendSparkline({ data, color, label, height = 48 }: TrendSparklineProps) {
+  const width = 100;
+  if (!data.length) {
+    return (
+      <div style={{ width: "100%", height }} aria-label={`${label} trend`}></div>
+    );
+  }
+
+  const domainStart = data[0].ts;
+  const domainEnd = data[data.length - 1].ts;
+  const span = Math.max(domainEnd - domainStart, 1);
+  const values = data.map((point) => point.value);
+  const minValue = Math.min(...values, 0);
+  const maxValue = Math.max(...values, 0);
+  const adjustedMin = minValue === maxValue ? minValue - 1 : minValue;
+  const adjustedMax = minValue === maxValue ? maxValue + 1 : maxValue;
+  const range = Math.max(adjustedMax - adjustedMin, 1);
+
+  const coords = data.map((point) => {
+    const x = span === 0 ? 0 : ((point.ts - domainStart) / span) * width;
+    const ratio = clamp((point.value - adjustedMin) / range, 0, 1);
+    const y = height - ratio * height;
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  });
+
+  const areaPath = `M0,${height} L${coords.join(" L ")} L${width},${height} Z`;
+  const linePath = `M${coords.join(" L ")}`;
+  const zeroRatio = clamp((0 - adjustedMin) / range, 0, 1);
+  const zeroY = height - zeroRatio * height;
+
+  return (
+    <div style={{ width: "100%", height }}>
+      <svg
+        width="100%"
+        height="100%"
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={`${label} trend sparkline`}
+      >
+        <path d={areaPath} fill={withAlpha(mixColor(color, COLOR.bg, 0.35), 0.25)} stroke="none" />
+        <line
+          x1={0}
+          y1={zeroY.toFixed(2)}
+          x2={width}
+          y2={zeroY.toFixed(2)}
+          stroke={withAlpha(mixColor(color, "#ffffff", 0.4), 0.6)}
+          strokeWidth={0.8}
+          strokeDasharray="3 3"
+        />
+        <path d={linePath} fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      </svg>
+    </div>
+  );
+}
+
+interface SummaryBoxProps {
+  title: string;
+  accent: string;
+  children: React.ReactNode;
+}
+
+function SummaryBox({ title, accent, children }: SummaryBoxProps) {
+  const background = `linear-gradient(135deg, ${withAlpha(mixColor(accent, "#ffffff", 0.35), 0.94)} 0%, ${withAlpha(
+    mixColor(accent, "#000000", 0.2),
+    0.9
+  )} 100%)`;
+  const border = `1px solid ${withAlpha(mixColor(accent, "#000000", 0.45), 0.9)}`;
+  return (
+    <div
+      style={{
+        background,
+        border,
+        borderRadius: 12,
+        padding: 12,
+        boxShadow: `0 10px 22px ${withAlpha(mixColor(accent, "#000000", 0.5), 0.35)}`,
+        display: "grid",
+        gap: 4,
+      }}
+    >
+      <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.6, color: withAlpha("#ffffff", 0.85) }}>
+        {title}
+      </div>
+      <div style={{ fontSize: 16, fontWeight: 600, color: COLOR.text }}>{children}</div>
+    </div>
+  );
+}
+
+interface FansCaratsAnalyticsProps {
+  entries: FansCaratsEntry[];
+  dailyStats: FansCaratsDailyStat[];
+  rollingTotals: Map<string, RollingTotal>;
+  weeklySummaries: FansCaratsWeeklySummary[];
+  weeklyTarget: number;
+  onSubmit: (entry: FansCaratsEntry) => void;
+  onDelete: (date: string) => void;
+  onUpdateWeeklyTarget: (target: number) => void;
+  fansTrend: TrendPoint[];
+  caratsTrend: TrendPoint[];
+}
+
+function FansCaratsAnalytics({
+  entries,
+  dailyStats,
+  rollingTotals,
+  weeklySummaries,
+  weeklyTarget,
+  onSubmit,
+  onDelete,
+  onUpdateWeeklyTarget,
+  fansTrend,
+  caratsTrend,
+}: FansCaratsAnalyticsProps) {
+  const entryMap = useMemo(() => new Map(entries.map((entry) => [entry.date, entry])), [entries]);
+  const latest = dailyStats.length ? dailyStats[dailyStats.length - 1] : null;
+  const latestEntry = latest ? entryMap.get(latest.date) ?? null : null;
+  const [formDate, setFormDate] = useState(() => latest?.date ?? getTodayISODate());
+  const [formFans, setFormFans] = useState(() => (latestEntry ? String(latestEntry.fans) : ""));
+  const [formCarats, setFormCarats] = useState(() => (latestEntry ? String(latestEntry.carats) : ""));
+  const [formError, setFormError] = useState<string | null>(null);
+  const [lastSavedDate, setLastSavedDate] = useState<string | null>(null);
+  const [weeklyTargetDraft, setWeeklyTargetDraft] = useState(() => weeklyTarget.toString());
+
+  useEffect(() => {
+    if (!latest) return;
+    setFormDate((prev) => prev || latest.date);
+  }, [latest?.date]);
+
+  useEffect(() => {
+    if (!latest) return;
+    const base = entryMap.get(latest.date);
+    setFormFans((prev) => (prev.trim().length ? prev : base ? String(base.fans) : ""));
+    setFormCarats((prev) => (prev.trim().length ? prev : base ? String(base.carats) : ""));
+  }, [latest?.date, entryMap]);
+
+  useEffect(() => {
+    setWeeklyTargetDraft(weeklyTarget.toString());
+  }, [weeklyTarget]);
+
+  const recentStats = useMemo(() => dailyStats.slice(-14).reverse(), [dailyStats]);
+  const latestRolling = latest ? rollingTotals.get(latest.date) ?? { fans: 0, carats: 0 } : null;
+  const currentWeekStart = latest ? startOfWeekISO(latest.date) : null;
+  const currentWeekSummary = currentWeekStart
+    ? weeklySummaries.find((summary) => summary.weekStart === currentWeekStart)
+    : undefined;
+  const previousWeekSummary = weeklySummaries.length >= 2 ? weeklySummaries[weeklySummaries.length - 2] : undefined;
+  const clubOnTrack = currentWeekSummary ? currentWeekSummary.fansDelta >= weeklyTarget : false;
+  const fansNeeded = currentWeekSummary ? Math.max(0, weeklyTarget - currentWeekSummary.fansDelta) : weeklyTarget;
+
+  const handleSubmit = useCallback(() => {
+    const normalizedDate = normalizeISODate(formDate);
+    if (!normalizedDate) {
+      setFormError("Enter a valid date (YYYY-MM-DD).");
+      return;
+    }
+    const fansValue = parseInteger(formFans);
+    if (fansValue == null) {
+      setFormError("Enter a numeric fans total.");
+      return;
+    }
+    const caratsValue = parseInteger(formCarats);
+    if (caratsValue == null) {
+      setFormError("Enter a numeric carats total.");
+      return;
+    }
+    setFormError(null);
+    setLastSavedDate(normalizedDate);
+    onSubmit({ date: normalizedDate, fans: fansValue, carats: caratsValue });
+  }, [formDate, formFans, formCarats, onSubmit]);
+
+  const handleDelete = useCallback(
+    (date: string) => {
+      onDelete(date);
+      if (date === formDate) {
+        setLastSavedDate(null);
+      }
+    },
+    [onDelete, formDate]
+  );
+
+  const loadEntry = useCallback(
+    (date: string) => {
+      const entry = entryMap.get(date);
+      if (!entry) return;
+      setFormDate(entry.date);
+      setFormFans(String(entry.fans));
+      setFormCarats(String(entry.carats));
+      setFormError(null);
+    },
+    [entryMap]
+  );
+
+  const handleUpdateTarget = useCallback(() => {
+    const parsed = parseInteger(weeklyTargetDraft);
+    if (parsed == null || parsed <= 0) {
+      setFormError("Enter a positive weekly fans target.");
+      return;
+    }
+    setFormError(null);
+    onUpdateWeeklyTarget(parsed);
+  }, [weeklyTargetDraft, onUpdateWeeklyTarget]);
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: 12,
+        }}
+      >
+        <SummaryBox title="Latest totals" accent={COLOR.fans}>
+          {latest ? (
+            <div style={{ display: "grid", gap: 2 }}>
+              <div>Fans: {formatNumber(latest.fans)}</div>
+              <div>Carats: {formatNumber(latest.carats)}</div>
+              <div style={{ fontSize: 12, color: COLOR.subtle }}>
+                Δ Fans {formatDelta(latest.fansDelta)} • Δ Carats {formatDelta(latest.caratsDelta)}
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, color: COLOR.subtle }}>Log your first totals to start tracking.</div>
+          )}
+        </SummaryBox>
+        <SummaryBox title="7-day rolling" accent={COLOR.carats}>
+          {latestRolling ? (
+            <div style={{ display: "grid", gap: 2 }}>
+              <div>Fans Δ: {formatNumber(latestRolling.fans)}</div>
+              <div>Carats Δ: {formatNumber(latestRolling.carats)}</div>
+              <div style={{ fontSize: 12, color: COLOR.subtle }}>
+                Based on the last seven logged days.
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, color: COLOR.subtle }}>Needs at least one entry.</div>
+          )}
+        </SummaryBox>
+        <SummaryBox title="Club weekly check" accent={clubOnTrack ? COLOR.good : COLOR.danger}>
+          <div style={{ display: "grid", gap: 2 }}>
+            <div>{clubOnTrack ? "On pace" : "Needs attention"}</div>
+            <div>
+              {formatNumber(currentWeekSummary?.fansDelta ?? 0)} / {formatNumber(weeklyTarget)} fans
+            </div>
+            <div style={{ fontSize: 12, color: COLOR.subtle }}>
+              {clubOnTrack
+                ? "Great work! Keep logging daily fans."
+                : `Need ${formatNumber(fansNeeded)} more fans by Sunday.`}
+            </div>
+          </div>
+        </SummaryBox>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gap: 12,
+          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+        }}
+      >
+        <div
+          style={{
+            background: COLOR.slate700,
+            borderRadius: 12,
+            padding: 12,
+            border: `1px solid ${withAlpha(COLOR.border, 0.7)}`,
+            boxShadow: `0 8px 18px ${withAlpha("#000000", 0.3)}`,
+            display: "grid",
+            gap: 8,
+          }}
+        >
+          <div style={{ fontSize: 14, fontWeight: 600 }}>Log daily totals</div>
+          <div style={{ display: "grid", gap: 8 }}>
+            <div style={{ display: "grid", gap: 6 }}>
+              <label style={{ fontSize: 12, color: COLOR.subtle }}>Date</label>
+              <Input type="date" value={formDate} onChange={setFormDate} />
+            </div>
+            <div style={{ display: "grid", gap: 6 }}>
+              <label style={{ fontSize: 12, color: COLOR.subtle }}>Fans total</label>
+              <Input value={formFans} onChange={setFormFans} placeholder="Enter fans" />
+            </div>
+            <div style={{ display: "grid", gap: 6 }}>
+              <label style={{ fontSize: 12, color: COLOR.subtle }}>Carats (Jewels) total</label>
+              <Input value={formCarats} onChange={setFormCarats} placeholder="Enter carats" />
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <SmallBtn onClick={handleSubmit}>Save daily totals</SmallBtn>
+            {lastSavedDate && (
+              <span style={{ fontSize: 12, color: COLOR.subtle }}>Saved {formatDateLabel(lastSavedDate)}</span>
+            )}
+          </div>
+          <div style={{ borderTop: `1px solid ${withAlpha(COLOR.border, 0.6)}`, paddingTop: 8, marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: COLOR.subtle, marginBottom: 6 }}>Weekly club target</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <Input value={weeklyTargetDraft} onChange={setWeeklyTargetDraft} placeholder="2,000,000" />
+              <SmallBtn onClick={handleUpdateTarget}>Update target</SmallBtn>
+            </div>
+          </div>
+          {formError && <div style={{ fontSize: 12, color: COLOR.danger }}>{formError}</div>}
+        </div>
+
+        <div
+          style={{
+            background: COLOR.slate700,
+            borderRadius: 12,
+            padding: 12,
+            border: `1px solid ${withAlpha(COLOR.border, 0.7)}`,
+            boxShadow: `0 8px 18px ${withAlpha("#000000", 0.3)}`,
+            display: "grid",
+            gap: 8,
+          }}
+        >
+          <div style={{ fontSize: 14, fontWeight: 600 }}>Trend snapshots</div>
+          <div style={{ display: "grid", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 12, color: COLOR.subtle, marginBottom: 4 }}>Fans daily change</div>
+              <TrendSparkline data={fansTrend} color={COLOR.fans} label="Fans daily change" />
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: COLOR.subtle, marginBottom: 4 }}>Carats daily change</div>
+              <TrendSparkline data={caratsTrend} color={COLOR.carats} label="Carats daily change" />
+            </div>
+          </div>
+          {previousWeekSummary && (
+            <div style={{ fontSize: 12, color: COLOR.subtle }}>
+              Previous week ({formatWeekRange(previousWeekSummary.weekStart, previousWeekSummary.weekEnd)}):
+              {" "}
+              {formatNumber(previousWeekSummary.fansDelta)} fans • {formatNumber(previousWeekSummary.caratsDelta)} carats
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div
+        style={{
+          background: COLOR.slate700,
+          borderRadius: 12,
+          padding: 12,
+          border: `1px solid ${withAlpha(COLOR.border, 0.7)}`,
+          boxShadow: `0 8px 18px ${withAlpha("#000000", 0.3)}`,
+        }}
+      >
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Recent daily logs</div>
+        {recentStats.length === 0 ? (
+          <div style={{ fontSize: 13, color: COLOR.subtle }}>Logs appear here once you save a daily total.</div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: 12,
+              }}
+            >
+              <thead>
+                <tr style={{ color: COLOR.subtle, textAlign: "left" }}>
+                  <th style={{ padding: "6px 4px" }}>Date</th>
+                  <th style={{ padding: "6px 4px" }}>Fans</th>
+                  <th style={{ padding: "6px 4px" }}>Δ Fans</th>
+                  <th style={{ padding: "6px 4px" }}>Carats</th>
+                  <th style={{ padding: "6px 4px" }}>Δ Carats</th>
+                  <th style={{ padding: "6px 4px" }}>7d Fans</th>
+                  <th style={{ padding: "6px 4px" }}>7d Carats</th>
+                  <th style={{ padding: "6px 4px" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentStats.map((stat) => {
+                  const totals = rollingTotals.get(stat.date) ?? { fans: 0, carats: 0 };
+                  return (
+                    <tr key={stat.date} style={{ borderTop: `1px solid ${withAlpha(COLOR.border, 0.6)}` }}>
+                      <td style={{ padding: "6px 4px", whiteSpace: "nowrap" }}>{formatDateLabel(stat.date)}</td>
+                      <td style={{ padding: "6px 4px" }}>{formatNumber(stat.fans)}</td>
+                      <td style={{ padding: "6px 4px", color: stat.fansDelta != null && stat.fansDelta >= 0 ? COLOR.good : COLOR.danger }}>
+                        {formatDelta(stat.fansDelta)}
+                      </td>
+                      <td style={{ padding: "6px 4px" }}>{formatNumber(stat.carats)}</td>
+                      <td style={{ padding: "6px 4px", color: stat.caratsDelta != null && stat.caratsDelta >= 0 ? COLOR.good : COLOR.danger }}>
+                        {formatDelta(stat.caratsDelta)}
+                      </td>
+                      <td style={{ padding: "6px 4px" }}>{formatNumber(totals.fans)}</td>
+                      <td style={{ padding: "6px 4px" }}>{formatNumber(totals.carats)}</td>
+                      <td style={{ padding: "6px 4px" }}>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <SmallBtn onClick={() => loadEntry(stat.date)}>Load</SmallBtn>
+                          <SmallBtn onClick={() => handleDelete(stat.date)} danger>
+                            Delete
+                          </SmallBtn>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {weeklySummaries.length > 0 && (
+        <div
+          style={{
+            background: COLOR.slate700,
+            borderRadius: 12,
+            padding: 12,
+            border: `1px solid ${withAlpha(COLOR.border, 0.7)}`,
+            boxShadow: `0 8px 18px ${withAlpha("#000000", 0.3)}`,
+            display: "grid",
+            gap: 6,
+          }}
+        >
+          <div style={{ fontSize: 14, fontWeight: 600 }}>Weekly summaries</div>
+          <div style={{ display: "grid", gap: 6 }}>
+            {[...weeklySummaries].reverse().map((summary) => (
+              <div
+                key={summary.weekStart}
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  background: withAlpha(COLOR.card, 0.6),
+                  border: `1px solid ${withAlpha(COLOR.border, 0.6)}`,
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{formatWeekRange(summary.weekStart, summary.weekEnd)}</div>
+                  <div style={{ fontSize: 12, color: COLOR.subtle }}>
+                    Logged {summary.daysLogged} day{summary.daysLogged === 1 ? "" : "s"}
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, textAlign: "right" }}>
+                  <div>Fans Δ: {formatDelta(summary.fansDelta)}</div>
+                  <div>Carats Δ: {formatDelta(summary.caratsDelta)}</div>
+                  <div style={{ color: COLOR.subtle }}>Last entry {formatDateLabel(summary.lastEntry)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3006,6 +3710,11 @@ export default function UmaResourceTracker() {
     "uma.history",
     createEmptyHistoryState()
   );
+  const [fansCaratsRaw, setFansCaratsState] = useLocalStorage<FansCaratsState>("uma.fansCarats", { entries: [] });
+  const [fansCaratsConfigRaw, setFansCaratsConfig] = useLocalStorage<FansCaratsConfig>(
+    "uma.fansCarats.config",
+    { weeklyFansTarget: DEFAULT_WEEKLY_FANS_TARGET }
+  );
   const [wastedResetRaw, setWastedResetState] = useLocalStorage<WastedResetState>("uma.wastedReset", {
     tp: null,
     rp: null,
@@ -3130,6 +3839,75 @@ export default function UmaResourceTracker() {
   );
   const history = useMemo(() => sanitizeHistoryState(historyRaw), [historyRaw]);
   const wastedReset = useMemo(() => sanitizeWastedResetState(wastedResetRaw), [wastedResetRaw]);
+  const fansCaratsStateSanitized = useMemo(() => sanitizeFansCaratsState(fansCaratsRaw), [fansCaratsRaw]);
+  const fansCaratsConfig = useMemo(() => sanitizeFansCaratsConfig(fansCaratsConfigRaw), [fansCaratsConfigRaw]);
+  const fansCaratsEntries = fansCaratsStateSanitized.entries;
+  const fansCaratsDailyStats = useMemo(
+    () => buildFansCaratsDailyStats(fansCaratsEntries),
+    [fansCaratsEntries]
+  );
+  const fansCaratsRolling7 = useMemo(
+    () => buildRollingTotals(fansCaratsDailyStats, 7),
+    [fansCaratsDailyStats]
+  );
+  const fansCaratsWeeklySummaries = useMemo(
+    () => buildWeeklySummaries(fansCaratsDailyStats),
+    [fansCaratsDailyStats]
+  );
+  const fansTrend = useMemo(
+    () => buildTrendSeries(fansCaratsDailyStats, "fansDelta", 30),
+    [fansCaratsDailyStats]
+  );
+  const caratsTrend = useMemo(
+    () => buildTrendSeries(fansCaratsDailyStats, "caratsDelta", 30),
+    [fansCaratsDailyStats]
+  );
+
+  const upsertFansCaratsEntry = useCallback(
+    (entry: FansCaratsEntry) => {
+      setFansCaratsState((prev) => {
+        const base = sanitizeFansCaratsState(prev);
+        const nextEntries = base.entries.filter((e) => e.date !== entry.date);
+        nextEntries.push({ date: entry.date, fans: entry.fans, carats: entry.carats });
+        nextEntries.sort((a, b) => a.date.localeCompare(b.date));
+        const unchanged =
+          base.entries.length === nextEntries.length &&
+          base.entries.every(
+            (existing, index) =>
+              existing.date === nextEntries[index].date &&
+              existing.fans === nextEntries[index].fans &&
+              existing.carats === nextEntries[index].carats
+          );
+        if (unchanged) return prev;
+        return { entries: nextEntries };
+      });
+    },
+    [setFansCaratsState]
+  );
+
+  const deleteFansCaratsEntry = useCallback(
+    (date: string) => {
+      setFansCaratsState((prev) => {
+        const base = sanitizeFansCaratsState(prev);
+        const nextEntries = base.entries.filter((entry) => entry.date !== date);
+        if (nextEntries.length === base.entries.length) return prev;
+        return { entries: nextEntries };
+      });
+    },
+    [setFansCaratsState]
+  );
+
+  const updateWeeklyFansTarget = useCallback(
+    (target: number) => {
+      setFansCaratsConfig((prev) => {
+        const current = sanitizeFansCaratsConfig(prev);
+        const next = sanitizeFansCaratsConfig({ weeklyFansTarget: target });
+        if (current.weeklyFansTarget === next.weeklyFansTarget) return prev;
+        return next;
+      });
+    },
+    [setFansCaratsConfig]
+  );
 
   useEffect(() => {
     const sanitized = sanitizeWastedResetState(wastedResetRaw);
@@ -4271,6 +5049,21 @@ export default function UmaResourceTracker() {
         />
       </div>
 
+      <Card title="Fans & Carats Analytics">
+        <FansCaratsAnalytics
+          entries={fansCaratsEntries}
+          dailyStats={fansCaratsDailyStats}
+          rollingTotals={fansCaratsRolling7}
+          weeklySummaries={fansCaratsWeeklySummaries}
+          weeklyTarget={fansCaratsConfig.weeklyFansTarget}
+          onSubmit={upsertFansCaratsEntry}
+          onDelete={deleteFansCaratsEntry}
+          onUpdateWeeklyTarget={updateWeeklyFansTarget}
+          fansTrend={fansTrend}
+          caratsTrend={caratsTrend}
+        />
+      </Card>
+
       <Card title="Daily Reset & Timer Overview">
         <CountdownRow targetMs={nextReset} timeZone={activeTimeZone} />
         <div style={{ marginTop: 12 }}>
@@ -4525,6 +5318,26 @@ export default function UmaResourceTracker() {
       Math.round(wastedLater.ms / 1000),
       Math.round(wastedAtCap.ms / 1000),
       "computeWastedAtCap does not decrease once off cap",
+    );
+
+    const normalizedDate = normalizeISODate("2024-07-06");
+    eq(normalizedDate, "2024-07-06", "normalizeISODate accepts valid strings");
+    const weekStart = startOfWeekISO("2024-07-06");
+    eq(weekStart, "2024-07-01", "startOfWeekISO returns Monday start");
+    const fcState = sanitizeFansCaratsState({
+      entries: [
+        { date: "2024-07-01", fans: 1000, carats: 25 },
+        { date: "2024-07-02", fans: 1200, carats: 30 },
+      ],
+    });
+    eq(fcState.entries.length, 2, "sanitizeFansCaratsState keeps valid entries");
+    const dailyStats = buildFansCaratsDailyStats(fcState.entries);
+    eq(dailyStats[1].fansDelta, 200, "buildFansCaratsDailyStats computes fan delta");
+    const weeklySummaries = buildWeeklySummaries(dailyStats);
+    eq(
+      weeklySummaries.length === 1 && Math.round(weeklySummaries[0].fansDelta) === 200,
+      true,
+      "buildWeeklySummaries aggregates fan delta",
     );
   } catch (e) {
     console.warn("Test harness error: ", e);
