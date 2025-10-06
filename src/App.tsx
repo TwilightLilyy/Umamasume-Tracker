@@ -155,6 +155,13 @@ function bindingFromEvent(event: KeyboardEvent): string | null {
   return normalizeBindingString([...orderedModifiers, keyPart].join("+"));
 }
 
+function generateId(prefix: string) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function formatBinding(binding: string | null) {
   if (!binding) return "Unassigned";
   const parts = binding.split("+");
@@ -271,8 +278,45 @@ interface FansCaratsEntry {
   carats: number;
 }
 
+type RunLogType = "training" | "race" | "event" | "concert" | "other";
+
+const RUN_LOG_TYPE_OPTIONS: { value: RunLogType; label: string }[] = [
+  { value: "training", label: "Training" },
+  { value: "race", label: "Race" },
+  { value: "event", label: "Event" },
+  { value: "concert", label: "Concert" },
+  { value: "other", label: "Other" },
+];
+
+const RUN_LOG_TYPE_SET = new Set<RunLogType>(RUN_LOG_TYPE_OPTIONS.map((option) => option.value));
+const RUN_LOG_TYPE_LABELS: Record<RunLogType, string> = RUN_LOG_TYPE_OPTIONS.reduce(
+  (acc, option) => {
+    acc[option.value] = option.label;
+    return acc;
+  },
+  {} as Record<RunLogType, string>,
+);
+
+interface FansCaratsRunLogEntry {
+  id: string;
+  date: string;
+  fans: number;
+  type: RunLogType;
+  notes: string;
+  createdAt: number;
+}
+
+interface RunLogEntryInput {
+  id?: string;
+  date: string;
+  fans: number;
+  type: RunLogType;
+  notes?: string;
+}
+
 interface FansCaratsState {
   entries: FansCaratsEntry[];
+  runLog: FansCaratsRunLogEntry[];
 }
 
 interface FansCaratsDailyStat extends FansCaratsEntry {
@@ -394,6 +438,7 @@ function parseInteger(value: string) {
 
 function sanitizeFansCaratsState(value: unknown): FansCaratsState {
   const entries: FansCaratsEntry[] = [];
+  const runLog: FansCaratsRunLogEntry[] = [];
   const rawEntries: unknown =
     value && typeof value === "object" && Array.isArray((value as FansCaratsState).entries)
       ? (value as FansCaratsState).entries
@@ -416,7 +461,54 @@ function sanitizeFansCaratsState(value: unknown): FansCaratsState {
   for (const date of sortedDates) {
     entries.push(map.get(date)!);
   }
-  return { entries };
+
+  const rawRunLog: unknown =
+    value && typeof value === "object" && Array.isArray((value as FansCaratsState).runLog)
+      ? (value as FansCaratsState).runLog
+      : [];
+
+  const seenIds = new Set<string>();
+  for (const entry of rawRunLog as FansCaratsRunLogEntry[]) {
+    if (!entry || typeof entry !== "object") continue;
+    const normalizedDate = normalizeISODate((entry as FansCaratsRunLogEntry).date);
+    if (!normalizedDate) continue;
+    const fansNum = Number((entry as FansCaratsRunLogEntry).fans);
+    if (!Number.isFinite(fansNum)) continue;
+    const fans = Math.max(0, Math.round(fansNum));
+    const typeRaw = (entry as FansCaratsRunLogEntry).type;
+    const type: RunLogType = RUN_LOG_TYPE_SET.has(typeRaw as RunLogType) ? (typeRaw as RunLogType) : "other";
+    const notesRaw = (entry as FansCaratsRunLogEntry).notes;
+    const notes =
+      typeof notesRaw === "string"
+        ? notesRaw.trim().slice(0, 500)
+        : notesRaw == null
+        ? ""
+        : String(notesRaw).trim().slice(0, 500);
+    const createdAtRaw = Number((entry as FansCaratsRunLogEntry).createdAt);
+    const createdAt = Number.isFinite(createdAtRaw) ? createdAtRaw : dateStringToMs(normalizedDate);
+    const idRaw = (entry as FansCaratsRunLogEntry).id;
+    const id =
+      typeof idRaw === "string" && idRaw.trim().length > 0 ? idRaw : generateId("run");
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+    runLog.push({
+      id,
+      date: normalizedDate,
+      fans,
+      type,
+      notes,
+      createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
+    });
+  }
+
+  runLog.sort((a, b) => {
+    if (b.createdAt !== a.createdAt) return b.createdAt - a.createdAt;
+    const dateDiff = b.date.localeCompare(a.date);
+    if (dateDiff !== 0) return dateDiff;
+    return b.id.localeCompare(a.id);
+  });
+
+  return { entries, runLog };
 }
 
 function sanitizeFansCaratsConfig(value: unknown): FansCaratsConfig {
@@ -1394,6 +1486,9 @@ interface FansCaratsAnalyticsProps {
   onUpdateWeeklyTarget: (target: number) => void;
   fansTrend: TrendPoint[];
   caratsTrend: TrendPoint[];
+  runLogEntries: FansCaratsRunLogEntry[];
+  onSaveRunLogEntry: (entry: RunLogEntryInput) => void;
+  onDeleteRunLogEntry: (id: string) => void;
 }
 
 function FansCaratsAnalytics({
@@ -1407,6 +1502,9 @@ function FansCaratsAnalytics({
   onUpdateWeeklyTarget,
   fansTrend,
   caratsTrend,
+  runLogEntries,
+  onSaveRunLogEntry,
+  onDeleteRunLogEntry,
 }: FansCaratsAnalyticsProps) {
   const entryMap = useMemo(() => new Map(entries.map((entry) => [entry.date, entry])), [entries]);
   const latest = dailyStats.length ? dailyStats[dailyStats.length - 1] : null;
@@ -1417,6 +1515,7 @@ function FansCaratsAnalytics({
   const [formError, setFormError] = useState<string | null>(null);
   const [lastSavedDate, setLastSavedDate] = useState<string | null>(null);
   const [weeklyTargetDraft, setWeeklyTargetDraft] = useState(() => weeklyTarget.toString());
+  const [activeTab, setActiveTab] = useState<"daily" | "runLog">("daily");
 
   useEffect(() => {
     if (!latest) return;
@@ -1499,13 +1598,24 @@ function FansCaratsAnalytics({
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: 12,
-        }}
-      >
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <TabButton active={activeTab === "daily"} onClick={() => setActiveTab("daily")}>
+          Daily totals
+        </TabButton>
+        <TabButton active={activeTab === "runLog"} onClick={() => setActiveTab("runLog")}>
+          Run log
+        </TabButton>
+      </div>
+
+      {activeTab === "daily" ? (
+        <>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: 12,
+            }}
+          >
         <SummaryBox title="Latest totals" accent={COLOR.fans}>
           {latest ? (
             <div style={{ display: "grid", gap: 2 }}>
@@ -1738,6 +1848,375 @@ function FansCaratsAnalytics({
           </div>
         </div>
       )}
+        </>
+      ) : (
+        <RunLogTab
+          entries={runLogEntries}
+          onSave={onSaveRunLogEntry}
+          onDelete={onDeleteRunLogEntry}
+          dailyStats={dailyStats}
+        />
+      )}
+    </div>
+  );
+}
+
+interface RunLogTabProps {
+  entries: FansCaratsRunLogEntry[];
+  onSave: (entry: RunLogEntryInput) => void;
+  onDelete: (id: string) => void;
+  dailyStats: FansCaratsDailyStat[];
+}
+
+function RunLogTab({ entries, onSave, onDelete, dailyStats }: RunLogTabProps) {
+  const [formDate, setFormDate] = useState(getTodayISODate());
+  const [formType, setFormType] = useState<RunLogType>("training");
+  const [formFans, setFormFans] = useState("");
+  const [formNotes, setFormNotes] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const totalFans = useMemo(() => entries.reduce((sum, entry) => sum + entry.fans, 0), [entries]);
+  const totalRuns = entries.length;
+  const averageFans = totalRuns > 0 ? totalFans / totalRuns : 0;
+  const last7Fans = useMemo(() => {
+    if (entries.length === 0) return 0;
+    const today = getTodayISODate();
+    const todayMs = dateStringToMs(today);
+    if (!Number.isFinite(todayMs)) {
+      return entries.reduce((sum, entry) => sum + entry.fans, 0);
+    }
+    const threshold = todayMs - 6 * DAY_MS;
+    return entries.reduce((sum, entry) => {
+      const entryMs = dateStringToMs(entry.date);
+      if (!Number.isFinite(entryMs)) return sum;
+      if (entryMs >= threshold && entryMs <= todayMs) return sum + entry.fans;
+      return sum;
+    }, 0);
+  }, [entries]);
+  const bestRun = useMemo(() => {
+    if (entries.length === 0) return null;
+    return entries.reduce((best, entry) => (entry.fans > best.fans ? entry : best), entries[0]);
+  }, [entries]);
+  const typeSummaries = useMemo(() => {
+    const map = new Map<RunLogType, { runs: number; fans: number }>();
+    RUN_LOG_TYPE_OPTIONS.forEach((option) => {
+      map.set(option.value, { runs: 0, fans: 0 });
+    });
+    for (const entry of entries) {
+      const summary = map.get(entry.type);
+      if (!summary) continue;
+      summary.runs += 1;
+      summary.fans += entry.fans;
+    }
+    return RUN_LOG_TYPE_OPTIONS.map((option) => {
+      const summary = map.get(option.value)!;
+      return { type: option.value, label: option.label, runs: summary.runs, fans: summary.fans };
+    }).filter((summary) => summary.runs > 0);
+  }, [entries]);
+  const runLogByDate = useMemo(() => {
+    const map = new Map<string, { fans: number; runs: number }>();
+    for (const entry of entries) {
+      const summary = map.get(entry.date) ?? { fans: 0, runs: 0 };
+      summary.fans += entry.fans;
+      summary.runs += 1;
+      map.set(entry.date, summary);
+    }
+    return map;
+  }, [entries]);
+  const recentDailyStats = useMemo(() => dailyStats.slice(-14), [dailyStats]);
+  const fansDeltaByDate = useMemo(() => {
+    const map = new Map<string, number | null>();
+    for (const stat of dailyStats) {
+      map.set(stat.date, stat.fansDelta ?? null);
+    }
+    return map;
+  }, [dailyStats]);
+  const dailyComparison = useMemo(() => {
+    const dates = new Set<string>();
+    for (const date of runLogByDate.keys()) dates.add(date);
+    for (const stat of recentDailyStats) dates.add(stat.date);
+    const sortedDates = [...dates].sort((a, b) => b.localeCompare(a));
+    return sortedDates.map((date) => {
+      const summary = runLogByDate.get(date);
+      const fansLogged = summary?.fans ?? 0;
+      const runCount = summary?.runs ?? 0;
+      const avgFans = runCount > 0 ? fansLogged / runCount : 0;
+      const recorded = fansDeltaByDate.get(date) ?? null;
+      return { date, fansLogged, runCount, avgFans, recorded };
+    });
+  }, [runLogByDate, fansDeltaByDate, recentDailyStats]);
+
+  const resetForm = useCallback((options?: { resetDate?: boolean; resetType?: boolean }) => {
+    setEditingId(null);
+    setFormFans("");
+    setFormNotes("");
+    setFormError(null);
+    if (options?.resetDate) setFormDate(getTodayISODate());
+    if (options?.resetType) setFormType("training");
+  }, []);
+
+  const handleSave = useCallback(() => {
+    const normalizedDate = normalizeISODate(formDate);
+    if (!normalizedDate) {
+      setFormError("Enter a valid date (YYYY-MM-DD).");
+      return;
+    }
+    const fansValue = parseInteger(formFans);
+    if (fansValue == null || fansValue < 0) {
+      setFormError("Enter fans gained as a non-negative number.");
+      return;
+    }
+    const notes = formNotes.trim().slice(0, 500);
+    onSave({ id: editingId ?? undefined, date: normalizedDate, fans: fansValue, type: formType, notes });
+    setFormDate(normalizedDate);
+    resetForm();
+  }, [formDate, formFans, formNotes, formType, editingId, onSave, resetForm]);
+
+  const handleEdit = useCallback((entry: FansCaratsRunLogEntry) => {
+    setEditingId(entry.id);
+    setFormDate(entry.date);
+    setFormType(entry.type);
+    setFormFans(String(entry.fans));
+    setFormNotes(entry.notes);
+    setFormError(null);
+  }, []);
+
+  const handleCancel = useCallback(() => {
+    resetForm({ resetDate: true, resetType: true });
+  }, [resetForm]);
+
+  const handleDeleteEntry = useCallback(
+    (id: string) => {
+      onDelete(id);
+      if (editingId === id) {
+        resetForm({ resetDate: true, resetType: true });
+      }
+    },
+    [onDelete, editingId, resetForm],
+  );
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <div
+        style={{
+          background: COLOR.slate700,
+          borderRadius: 12,
+          padding: 12,
+          border: `1px solid ${withAlpha(COLOR.border, 0.7)}`,
+          display: "grid",
+          gap: 10,
+          boxShadow: `0 8px 18px ${withAlpha("#000000", 0.3)}`,
+        }}
+      >
+        <div style={{ fontSize: 14, fontWeight: 600 }}>Run log insights</div>
+        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+          <div style={{ display: "grid", gap: 2 }}>
+            <div style={{ fontSize: 12, color: COLOR.subtle }}>Runs logged</div>
+            <div style={{ fontSize: 18, fontWeight: 600 }}>{totalRuns.toLocaleString()}</div>
+          </div>
+          <div style={{ display: "grid", gap: 2 }}>
+            <div style={{ fontSize: 12, color: COLOR.subtle }}>Fans recorded</div>
+            <div style={{ fontSize: 18, fontWeight: 600 }}>{formatNumber(totalFans)}</div>
+          </div>
+          <div style={{ display: "grid", gap: 2 }}>
+            <div style={{ fontSize: 12, color: COLOR.subtle }}>Avg fans per run</div>
+            <div style={{ fontSize: 18, fontWeight: 600 }}>{formatNumber(Math.round(averageFans))}</div>
+          </div>
+          <div style={{ display: "grid", gap: 2 }}>
+            <div style={{ fontSize: 12, color: COLOR.subtle }}>Fans last 7 days</div>
+            <div style={{ fontSize: 18, fontWeight: 600 }}>{formatNumber(last7Fans)}</div>
+          </div>
+        </div>
+        {bestRun && (
+          <div style={{ fontSize: 12, color: COLOR.subtle }}>
+            Best run: {formatNumber(bestRun.fans)} fans ({RUN_LOG_TYPE_LABELS[bestRun.type]}) on {formatDateLabel(bestRun.date)}
+          </div>
+        )}
+        {typeSummaries.length > 0 && (
+          <div style={{ fontSize: 12, color: COLOR.subtle }}>
+            Type breakdown: {typeSummaries
+              .map((summary) =>
+                `${summary.label}: ${summary.runs.toLocaleString()} run${summary.runs === 1 ? "" : "s"} / ${formatNumber(summary.fans)}`,
+              )
+              .join(" • ")}
+          </div>
+        )}
+      </div>
+
+      <div
+        style={{
+          background: COLOR.slate700,
+          borderRadius: 12,
+          padding: 12,
+          border: `1px solid ${withAlpha(COLOR.border, 0.7)}`,
+          boxShadow: `0 8px 18px ${withAlpha("#000000", 0.3)}`,
+          display: "grid",
+          gap: 10,
+        }}
+      >
+        <div style={{ fontSize: 14, fontWeight: 600 }}>{editingId ? "Edit run entry" : "Log a run"}</div>
+        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+          <div>
+            <Label>Date</Label>
+            <Input type="date" value={formDate} onChange={setFormDate} />
+          </div>
+          <div>
+            <Label>Run type</Label>
+            <Select
+              value={formType}
+              onChange={(value) =>
+                setFormType(RUN_LOG_TYPE_SET.has(value as RunLogType) ? (value as RunLogType) : "other")
+              }
+            >
+              {RUN_LOG_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label>Fans gained</Label>
+            <Input value={formFans} onChange={setFormFans} placeholder="Enter fans" />
+          </div>
+        </div>
+        <div>
+          <Label>Notes</Label>
+          <TextArea value={formNotes} onChange={setFormNotes} placeholder="Training focus, event notes, etc." rows={3} />
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <SmallBtn onClick={handleSave}>{editingId ? "Update run" : "Log run"}</SmallBtn>
+          {editingId && <SmallBtn onClick={handleCancel}>Cancel</SmallBtn>}
+          {formError && <div style={{ color: COLOR.danger, fontSize: 12 }}>{formError}</div>}
+        </div>
+      </div>
+
+      <div
+        style={{
+          background: COLOR.slate700,
+          borderRadius: 12,
+          padding: 12,
+          border: `1px solid ${withAlpha(COLOR.border, 0.7)}`,
+          boxShadow: `0 8px 18px ${withAlpha("#000000", 0.3)}`,
+          display: "grid",
+          gap: 10,
+        }}
+      >
+        <div style={{ fontSize: 14, fontWeight: 600 }}>Daily comparison</div>
+        {dailyComparison.length === 0 ? (
+          <div style={{ fontSize: 13, color: COLOR.subtle }}>
+            Log runs or daily totals to see how run gains align with recorded fans.
+          </div>
+        ) : (
+          <>
+            <div style={{ overflowX: "auto" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: 12,
+                }}
+              >
+                <thead>
+                  <tr style={{ color: COLOR.subtle, textAlign: "left" }}>
+                    <th style={{ padding: "6px 4px" }}>Date</th>
+                    <th style={{ padding: "6px 4px" }}>Runs</th>
+                    <th style={{ padding: "6px 4px" }}>Fans logged</th>
+                    <th style={{ padding: "6px 4px" }}>Avg fans</th>
+                    <th style={{ padding: "6px 4px" }}>Recorded Δ</th>
+                    <th style={{ padding: "6px 4px" }}>Gap</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dailyComparison.map((row) => {
+                    const diff = row.recorded == null ? null : row.recorded - row.fansLogged;
+                    const diffColor = diff == null ? COLOR.text : diff <= 0 ? COLOR.good : COLOR.danger;
+                    return (
+                      <tr key={row.date} style={{ borderTop: `1px solid ${withAlpha(COLOR.border, 0.6)}` }}>
+                        <td style={{ padding: "6px 4px", whiteSpace: "nowrap" }}>{formatDateLabel(row.date)}</td>
+                        <td style={{ padding: "6px 4px" }}>{row.runCount.toLocaleString()}</td>
+                        <td style={{ padding: "6px 4px" }}>{formatNumber(row.fansLogged)}</td>
+                        <td style={{ padding: "6px 4px" }}>{formatNumber(Math.round(row.avgFans))}</td>
+                        <td style={{ padding: "6px 4px" }}>{formatDelta(row.recorded)}</td>
+                        <td style={{ padding: "6px 4px", color: diffColor }}>{formatDelta(diff)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ fontSize: 12, color: COLOR.subtle }}>
+              Gap = recorded daily fans minus fans accounted for in your run log.
+            </div>
+          </>
+        )}
+      </div>
+
+      <div
+        style={{
+          background: COLOR.slate700,
+          borderRadius: 12,
+          padding: 12,
+          border: `1px solid ${withAlpha(COLOR.border, 0.7)}`,
+          boxShadow: `0 8px 18px ${withAlpha("#000000", 0.3)}`,
+          display: "grid",
+          gap: 10,
+        }}
+      >
+        <div style={{ fontSize: 14, fontWeight: 600 }}>Run history</div>
+        {entries.length === 0 ? (
+          <div style={{ fontSize: 13, color: COLOR.subtle }}>Runs will appear here after you log them.</div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: 12,
+              }}
+            >
+              <thead>
+                <tr style={{ color: COLOR.subtle, textAlign: "left" }}>
+                  <th style={{ padding: "6px 4px" }}>Date</th>
+                  <th style={{ padding: "6px 4px" }}>Type</th>
+                  <th style={{ padding: "6px 4px" }}>Fans</th>
+                  <th style={{ padding: "6px 4px" }}>Notes</th>
+                  <th style={{ padding: "6px 4px" }}>Logged</th>
+                  <th style={{ padding: "6px 4px" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map((entry) => {
+                  const loggedLabel = new Date(entry.createdAt).toLocaleString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  });
+                  return (
+                    <tr key={entry.id} style={{ borderTop: `1px solid ${withAlpha(COLOR.border, 0.6)}` }}>
+                      <td style={{ padding: "6px 4px", whiteSpace: "nowrap" }}>{formatDateLabel(entry.date)}</td>
+                      <td style={{ padding: "6px 4px" }}>{RUN_LOG_TYPE_LABELS[entry.type]}</td>
+                      <td style={{ padding: "6px 4px" }}>{formatNumber(entry.fans)}</td>
+                      <td style={{ padding: "6px 4px", whiteSpace: "pre-wrap", maxWidth: 320 }}>{entry.notes || "—"}</td>
+                      <td style={{ padding: "6px 4px", whiteSpace: "nowrap" }}>{loggedLabel}</td>
+                      <td style={{ padding: "6px 4px" }}>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <SmallBtn onClick={() => handleEdit(entry)}>Edit</SmallBtn>
+                          <SmallBtn danger onClick={() => handleDeleteEntry(entry.id)}>
+                            Delete
+                          </SmallBtn>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1843,6 +2322,37 @@ function SmallBtn({ onClick, children, danger, disabled }: SmallBtnProps) {
   );
 }
 
+interface TabButtonProps {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}
+
+function TabButton({ active, onClick, children }: TabButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "6px 14px",
+        fontSize: 12,
+        borderRadius: 999,
+        background: active
+          ? `linear-gradient(135deg, ${withAlpha(COLOR.slate700, 0.92)} 0%, ${withAlpha(mixColor(COLOR.slate700, "#000000", 0.2), 0.95)} 100%)`
+          : `linear-gradient(135deg, ${withAlpha(mixColor(COLOR.bg, "#ffffff", 0.05), 0.9)} 0%, ${withAlpha(mixColor(COLOR.bg, "#000000", 0.35), 0.95)} 100%)`,
+        color: COLOR.text,
+        border: `1px solid ${withAlpha(COLOR.border, active ? 0.9 : 0.7)}`,
+        boxShadow: active ? `0 6px 16px ${withAlpha("#000000", 0.35)}` : `0 2px 8px ${withAlpha("#000000", 0.25)}`,
+        cursor: "pointer",
+        opacity: active ? 1 : 0.85,
+        transition: "transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 interface InputProps {
   value: string;
   onChange: (value: string) => void;
@@ -1868,6 +2378,38 @@ function Input({ value, onChange, placeholder, type = "text" }: InputProps) {
         border: `1px solid ${withAlpha(COLOR.border, 0.85)}`,
         width: "100%",
         boxShadow: `0 4px 14px ${withAlpha("#000000", 0.28)}`,
+      }}
+    />
+  );
+}
+
+interface TextAreaProps {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  rows?: number;
+}
+
+function TextArea({ value, onChange, placeholder, rows = 3 }: TextAreaProps) {
+  return (
+    <textarea
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      rows={rows}
+      style={{
+        padding: "6px 10px",
+        borderRadius: 10,
+        background: `linear-gradient(135deg, ${withAlpha(mixColor(COLOR.bg, "#ffffff", 0.08), 0.9)} 0%, ${withAlpha(
+          mixColor(COLOR.bg, "#000000", 0.4),
+          0.95,
+        )} 100%)`,
+        color: COLOR.text,
+        border: `1px solid ${withAlpha(COLOR.border, 0.85)}`,
+        width: "100%",
+        boxShadow: `0 4px 14px ${withAlpha("#000000", 0.28)}`,
+        resize: "vertical",
+        minHeight: 60,
       }}
     />
   );
@@ -3710,7 +4252,10 @@ export default function UmaResourceTracker() {
     "uma.history",
     createEmptyHistoryState()
   );
-  const [fansCaratsRaw, setFansCaratsState] = useLocalStorage<FansCaratsState>("uma.fansCarats", { entries: [] });
+  const [fansCaratsRaw, setFansCaratsState] = useLocalStorage<FansCaratsState>("uma.fansCarats", {
+    entries: [],
+    runLog: [],
+  });
   const [fansCaratsConfigRaw, setFansCaratsConfig] = useLocalStorage<FansCaratsConfig>(
     "uma.fansCarats.config",
     { weeklyFansTarget: DEFAULT_WEEKLY_FANS_TARGET }
@@ -3842,6 +4387,7 @@ export default function UmaResourceTracker() {
   const fansCaratsStateSanitized = useMemo(() => sanitizeFansCaratsState(fansCaratsRaw), [fansCaratsRaw]);
   const fansCaratsConfig = useMemo(() => sanitizeFansCaratsConfig(fansCaratsConfigRaw), [fansCaratsConfigRaw]);
   const fansCaratsEntries = fansCaratsStateSanitized.entries;
+  const fansCaratsRunLog = fansCaratsStateSanitized.runLog;
   const fansCaratsDailyStats = useMemo(
     () => buildFansCaratsDailyStats(fansCaratsEntries),
     [fansCaratsEntries]
@@ -3879,7 +4425,7 @@ export default function UmaResourceTracker() {
               existing.carats === nextEntries[index].carats
           );
         if (unchanged) return prev;
-        return { entries: nextEntries };
+        return { entries: nextEntries, runLog: base.runLog };
       });
     },
     [setFansCaratsState]
@@ -3891,10 +4437,62 @@ export default function UmaResourceTracker() {
         const base = sanitizeFansCaratsState(prev);
         const nextEntries = base.entries.filter((entry) => entry.date !== date);
         if (nextEntries.length === base.entries.length) return prev;
-        return { entries: nextEntries };
+        return { entries: nextEntries, runLog: base.runLog };
       });
     },
     [setFansCaratsState]
+  );
+
+  const saveRunLogEntry = useCallback(
+    (entry: RunLogEntryInput) => {
+      setFansCaratsState((prev) => {
+        const base = sanitizeFansCaratsState(prev);
+        const normalizedDate = normalizeISODate(entry.date);
+        if (!normalizedDate) return prev;
+        const fansRaw = Number(entry.fans);
+        const fansValue = Number.isFinite(fansRaw) ? Math.max(0, Math.round(fansRaw)) : 0;
+        const type = RUN_LOG_TYPE_SET.has(entry.type) ? entry.type : "other";
+        const notes = (entry.notes ?? "").toString().trim().slice(0, 500);
+        const existing = entry.id ? base.runLog.find((run) => run.id === entry.id) : undefined;
+        const id = existing?.id
+          ?? (typeof entry.id === "string" && entry.id.trim().length > 0 ? entry.id : generateId("run"));
+        const createdAt = existing?.createdAt ?? Date.now();
+        const nextRunLog = base.runLog.filter((run) => run.id !== id);
+        nextRunLog.push({ id, date: normalizedDate, fans: fansValue, type, notes, createdAt });
+        nextRunLog.sort((a, b) => {
+          if (b.createdAt !== a.createdAt) return b.createdAt - a.createdAt;
+          const dateDiff = b.date.localeCompare(a.date);
+          if (dateDiff !== 0) return dateDiff;
+          return b.id.localeCompare(a.id);
+        });
+        const unchanged =
+          base.runLog.length === nextRunLog.length &&
+          base.runLog.every(
+            (run, index) =>
+              run.id === nextRunLog[index].id &&
+              run.date === nextRunLog[index].date &&
+              run.fans === nextRunLog[index].fans &&
+              run.type === nextRunLog[index].type &&
+              run.notes === nextRunLog[index].notes &&
+              run.createdAt === nextRunLog[index].createdAt,
+          );
+        if (unchanged) return prev;
+        return { entries: base.entries, runLog: nextRunLog };
+      });
+    },
+    [setFansCaratsState],
+  );
+
+  const deleteRunLogEntry = useCallback(
+    (id: string) => {
+      setFansCaratsState((prev) => {
+        const base = sanitizeFansCaratsState(prev);
+        const nextRunLog = base.runLog.filter((entry) => entry.id !== id);
+        if (nextRunLog.length === base.runLog.length) return prev;
+        return { entries: base.entries, runLog: nextRunLog };
+      });
+    },
+    [setFansCaratsState],
   );
 
   const updateWeeklyFansTarget = useCallback(
@@ -5061,6 +5659,9 @@ export default function UmaResourceTracker() {
           onUpdateWeeklyTarget={updateWeeklyFansTarget}
           fansTrend={fansTrend}
           caratsTrend={caratsTrend}
+          runLogEntries={fansCaratsRunLog}
+          onSaveRunLogEntry={saveRunLogEntry}
+          onDeleteRunLogEntry={deleteRunLogEntry}
         />
       </Card>
 
@@ -5331,6 +5932,15 @@ export default function UmaResourceTracker() {
       ],
     });
     eq(fcState.entries.length, 2, "sanitizeFansCaratsState keeps valid entries");
+    const runLogSanitized = sanitizeFansCaratsState({
+      entries: [],
+      runLog: [
+        { id: "", date: "2024-07-03", fans: 1500, type: "training", notes: "note", createdAt: Date.now() },
+        { id: "dup", date: "bad", fans: "nan", type: "mystery", notes: 123, createdAt: "nope" as unknown as number },
+      ],
+    });
+    eq(runLogSanitized.runLog.length >= 1, true, "sanitizeFansCaratsState keeps run log entries");
+    eq(runLogSanitized.runLog[0].type, "training", "sanitizeFansCaratsState normalizes run log type");
     const dailyStats = buildFansCaratsDailyStats(fcState.entries);
     eq(dailyStats[1].fansDelta, 200, "buildFansCaratsDailyStats computes fan delta");
     const weeklySummaries = buildWeeklySummaries(dailyStats);
